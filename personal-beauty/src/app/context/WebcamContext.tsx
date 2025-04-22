@@ -334,7 +334,7 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const detect = async () => {
       const now = performance.now();
-      if (now - lastDetectTime.current < 100) { // 10 FPS
+      if (now - lastDetectTime.current < 50) { // 10 FPS
         animationFrameId.current = requestAnimationFrame(detect);
         return;
       }
