@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/app/context/WebcamContext.tsx
 
 "use client";
@@ -15,13 +16,16 @@ interface HandData {
 
 interface WebcamContextType {
   stream: MediaStream | null;
-  videoRef: React.RefObject<HTMLVideoElement>;
+  videoRef: any;
   error: string | null;
   restartStream: () => Promise<void>;
   handData: HandData;
   setIsHandDetectionEnabled: (enabled: boolean) => void;
   isIndexFingerRaised: boolean;
-  isHandDetectionEnabled: boolean; // Thêm để đồng bộ
+  isHandDetectionEnabled: boolean;
+  detectionResults: { [key: string]: any };
+  currentView: string;
+  setCurrentView: (view: any) => void;
 }
 
 const WebcamContext = createContext<WebcamContextType | undefined>(undefined);
@@ -60,8 +64,8 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [VIEWS.PERSONAL_COLOR]: ["hand", "face"],
     [VIEWS.PERSONAL_BODY_TYPE]: ["pose"],
     [VIEWS.HOME]: ["hand"],
-    [VIEWS.HAIR_COLOR]: ["face"],
-    [VIEWS.PERSONAL_MAKEUP]: ["face"],
+    [VIEWS.HAIR_COLOR]: ["hand"],
+    [VIEWS.PERSONAL_MAKEUP]: ["hand", "face"],
     [VIEWS.COSMETIC_SURGERY]: ["face", "pose"],
   };
 
@@ -152,6 +156,7 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         video: {
           width: { ideal: 640 },
           height: { ideal: 480 },
+          frameRate: { ideal: 10, max: 10 }
         },
       });
       setStream(mediaStream);
@@ -184,7 +189,6 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       videoRef.current.play().catch((err) => {
         console.error("[WebcamProvider] Error playing video:", err);
       });
-      console.log("[WebcamProvider] Video stream attached to videoRef");
     }
   }, [stream]);
 
@@ -193,7 +197,6 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     workerRef.current.onmessage = (e: MessageEvent) => {
       const { type, success, error, modelType, results } = e.data;
-
       if (type === "initialized") {
         if (!success) {
           setError(`Failed to initialize ${modelType}: ${error}`);
@@ -206,7 +209,7 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (type === "detectionResult") {
         if (error) {
           setError(`Detection error: ${error}`);
-          console.log("[WebcamProvider] Detection error:", error);
+
           return;
         }
 
@@ -325,14 +328,13 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const video = videoRef.current;
     const canvas = document.createElement("canvas");
-    canvas.width = 320;
-    canvas.height = 240;
+    canvas.width = 64;
+    canvas.height = 48;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
     const detect = async () => {
       const now = performance.now();
-      if (now - lastDetectTime.current < 33) { // 20 FPS
-        // 10 FPS
+      if (now - lastDetectTime.current < 100) { // 10 FPS
         animationFrameId.current = requestAnimationFrame(detect);
         return;
       }
@@ -358,7 +360,9 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           data: {
             imageBitmap,
             timestamp: now,
+            time: new Date().getTime(),
             modelTypes,
+            currentView,
           },
         },
         [imageBitmap]
@@ -451,10 +455,13 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsHandDetectionEnabled,
         isIndexFingerRaised,
         isHandDetectionEnabled, // Truyền ra để đồng bộ
+        currentView,
+        detectionResults,
+        setCurrentView
       }}
     >
       {children}
-      <video ref={videoRef} className="hidden" />
+      <video id="video-id-1" ref={videoRef} className="hidden" />
     </WebcamContext.Provider>
   );
 };

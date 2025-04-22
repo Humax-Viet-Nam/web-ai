@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // src/app/context/VisionWorker.ts
 
-import { HandLandmarker, FaceLandmarker, PoseLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
+import { HandLandmarker, FaceLandmarker, PoseLandmarker, FilesetResolver, ImageSegmenter } from "@mediapipe/tasks-vision";
 
 const models: { [key: string]: any } = {};
 const modelConfigs: { [key: string]: any } = {
@@ -26,6 +27,19 @@ const modelConfigs: { [key: string]: any } = {
       outputFaceBlendshapes: false,
       runningMode: "VIDEO",
       numFaces: 1,
+    },
+  },
+  hair: {
+    class: ImageSegmenter,
+    options: {
+      baseOptions: {
+          modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/image_segmenter/hair_segmenter/float32/1/hair_segmenter.tflite",
+          delegate: "GPU"
+      },
+      runningMode: "VIDEO",
+      outputCategoryMask: true,
+      outputConfidenceMasks: false
     },
   },
   pose: {

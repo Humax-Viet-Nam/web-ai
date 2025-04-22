@@ -1,15 +1,17 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable react-hooks/exhaustive-deps */
 // src/pages/PersonalColor.tsx
 "use client";
 
 import { useState, useEffect, useRef } from "react";
 import {
+    DrawingUtils,
+    FaceLandmarker,
+    FilesetResolver,
     NormalizedLandmark,
 } from "@mediapipe/tasks-vision";
 import AnalysisLayout from "../components/AnalysisLayout";
 import { useWebcam } from "../context/WebcamContext";
 import { useLoading } from "../context/LoadingContext"; // Thêm import
+import { useHandControl } from "../context/HandControlContext";
 import { VIEWS } from "../constants/views";
 
 type FacialFeatures = {
@@ -26,19 +28,66 @@ type FacialFeatures = {
 };
 
 export default function PersonalColor() {
-    const { stream, error: webcamError, restartStream, detectionResults, setCurrentView } = useWebcam();
+    const { stream, error: webcamError, restartStream } = useWebcam();
     const { setIsLoading } = useLoading(); // Sử dụng context
+    const { registerElement, unregisterElement } = useHandControl();
     const [error, setError] = useState<string | null>(null);
+    const [isFaceLandmarkerReady, setIsFaceLandmarkerReady] = useState(false);
     const [isVideoReady, setIsVideoReady] = useState(false);
     const [isFaceDetectionActive, setIsFaceDetectionActive] = useState(true); // Thêm trạng thái chế độ
     const [statusMessage, setStatusMessage] = useState("Face Detection Active"); // Thêm thông báo trạng thái
     const [twoFingersProgress, setTwoFingersProgress] = useState(0); // Thêm tiến trình giơ 2 ngón tay
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const faceLandmarkerRef = useRef<FaceLandmarker | null>(null);
     const displayVideoRef = useRef<HTMLVideoElement>(null);
     const animationFrameId = useRef<number | null>(null);
     const [makeupSuggestion, setMakeupSuggestion] = useState<any | null>(null);
-    const [isApplyMakeup, setIsApplyMakeup] = useState(true);
-   const lastDetectTime = useRef(0);
+    const [isApplyMakeup, setIsApplyMakeup] = useState(false);
+
+    useEffect(() => {
+        const initializeFaceLandmarker = async () => {
+            try {
+                const filesetResolver = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm"
+                );
+                const faceLandmarker = await FaceLandmarker.createFromOptions(
+                    filesetResolver,
+                    {
+                        baseOptions: {
+                            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+                            delegate: "GPU",
+                        },
+                        outputFaceBlendshapes: true,
+                        runningMode: "VIDEO",
+                        numFaces: 1,
+                    }
+                );
+
+                faceLandmarkerRef.current = faceLandmarker;
+                setIsFaceLandmarkerReady(true);
+                console.log("[PersonalColor] FaceLandmarker initialized");
+            } catch (err) {
+                console.error(
+                    "[PersonalColor] Error initializing FaceLandmarker:",
+                    err
+                );
+                setError("Failed to initialize face detection.");
+            }
+        };
+
+        initializeFaceLandmarker();
+
+        return () => {
+            if (faceLandmarkerRef.current) {
+                faceLandmarkerRef.current.close();
+                faceLandmarkerRef.current = null;
+            }
+            setIsFaceLandmarkerReady(false);
+            if (animationFrameId.current) {
+                cancelAnimationFrame(animationFrameId.current);
+            }
+        };
+    }, []);
 
     function analyzeFacialFeatures(
         landmarks: NormalizedLandmark[]
@@ -202,7 +251,7 @@ export default function PersonalColor() {
     useEffect(() => {
         if (stream && displayVideoRef.current) {
             displayVideoRef.current.srcObject = stream;
-            displayVideoRef.current!.play().catch((err) => {
+            displayVideoRef.current.play().catch((err) => {
                 console.error("[PersonalColor] Error playing video:", err);
             });
 
@@ -228,6 +277,7 @@ export default function PersonalColor() {
 
     useEffect(() => {
         if (
+            !isFaceLandmarkerReady ||
             !stream ||
             !canvasRef.current ||
             !displayVideoRef.current ||
@@ -235,6 +285,7 @@ export default function PersonalColor() {
         ) {
             console.log(
                 "[PersonalColor] Waiting for FaceLandmarker or webcam...",
+                isFaceLandmarkerReady,
                 stream,
                 canvasRef.current,
                 displayVideoRef.current
@@ -249,17 +300,47 @@ export default function PersonalColor() {
             return;
         }
 
-        const detect = () => {
-            try {
-                
-                const now = performance.now();
-                if (now - lastDetectTime.current < 100) { // 10 FPS
-                    animationFrameId.current = requestAnimationFrame(detect);
-                    return;
+        const waitForVideoReady = async () => {
+            let retries = 5;
+            while (retries > 0 && video.readyState < 4) {
+                console.log(
+                    "[PersonalColor] Video not ready, waiting... readyState:",
+                    video.readyState,
+                    "retries left:",
+                    retries
+                );
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+                retries--;
+                if (video.readyState < 4) {
+                    await restartStream();
                 }
-                lastDetectTime.current = now;
-                if (detectionResults?.face?.faceLandmarks && detectionResults?.face?.faceLandmarks.length > 0) {
-                    const landmarks = detectionResults?.face?.faceLandmarks[0];
+            }
+            if (video.readyState < 4) {
+                setError("Failed to load webcam video for face detection.");
+                return false;
+            }
+            return true;
+        };
+
+        const detect = async () => {
+            if (!faceLandmarkerRef.current) {
+                animationFrameId.current = requestAnimationFrame(detect);
+                return;
+            }
+
+            const isVideoReady = await waitForVideoReady();
+            if (!isVideoReady) {
+                return;
+            }
+
+            try {
+                const results = await faceLandmarkerRef.current.detectForVideo(
+                    video,
+                    performance.now()
+                );
+
+                if (results.faceLandmarks && results.faceLandmarks.length > 0) {
+                    const landmarks = results.faceLandmarks[0];
                     const features = analyzeFacialFeatures(landmarks);
                     const suggestion = generateMakeupSuggestion(features);
 
@@ -284,15 +365,65 @@ export default function PersonalColor() {
                     }
     
                     ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+                    // const drawingUtils = new DrawingUtils(ctx);
+                    // for (const landmarks of results.faceLandmarks) {
+                    //     drawingUtils.drawConnectors(
+                    //         landmarks,
+                    //         FaceLandmarker.FACE_LANDMARKS_TESSELATION,
+                    //         { color: "#C0C0C070", lineWidth: 1 }
+                    //     );
+                    //     drawingUtils.drawConnectors(
+                    //         landmarks,
+                    //         FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
+                    //         { color: "#FF3030" }
+                    //     );
+                    //     drawingUtils.drawConnectors(
+                    //         landmarks,
+                    //         FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
+                    //         { color: "#FF3030" }
+                    //     );
+                    //     drawingUtils.drawConnectors(
+                    //         landmarks,
+                    //         FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
+                    //         { color: "#30FF30" }
+                    //     );
+                    //     drawingUtils.drawConnectors(
+                    //         landmarks,
+                    //         FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
+                    //         { color: "#30FF30" }
+                    //     );
+                    //     drawingUtils.drawConnectors(
+                    //         landmarks,
+                    //         FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
+                    //         { color: "#E0E0E0" }
+                    //     );
+                    //     drawingUtils.drawConnectors(
+                    //         landmarks,
+                    //         FaceLandmarker.FACE_LANDMARKS_LIPS,
+                    //         { color: "#E0E0E0" }
+                    //     );
+                    //     drawingUtils.drawConnectors(
+                    //         landmarks,
+                    //         FaceLandmarker.FACE_LANDMARKS_RIGHT_IRIS,
+                    //         { color: "#FF3030" }
+                    //     );
+                    //     drawingUtils.drawConnectors(
+                    //         landmarks,
+                    //         FaceLandmarker.FACE_LANDMARKS_LEFT_IRIS,
+                    //         { color: "#30FF30" }
+                    //     );
+                    // }
 
                     detectBlinkWithinTime(landmarks);
 
-                    drawMakeup(
-                        ctx,
-                        landmarks,
-                        video.videoWidth,
-                        video.videoHeight
-                    );
+                    console.log(isApplyMakeup);
+
+                        drawMakeup(
+                            ctx,
+                            landmarks,
+                            video.videoWidth,
+                            video.videoHeight
+                        );
 
                     setStatusMessage("ok");
 
@@ -317,11 +448,7 @@ export default function PersonalColor() {
                 cancelAnimationFrame(animationFrameId.current);
             }
         };
-    }, [stream, restartStream, detectionResults]);
-
-    useEffect(() => {
-        setCurrentView(VIEWS.PERSONAL_MAKEUP)
-    }, []);
+    }, [isFaceLandmarkerReady, stream, restartStream]);
 
     function drawMakeup(
         ctx: CanvasRenderingContext2D,
