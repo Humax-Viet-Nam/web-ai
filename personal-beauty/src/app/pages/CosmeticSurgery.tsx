@@ -13,46 +13,45 @@ import { useLoading } from "../context/LoadingContext";
 import { VIEWS } from "../constants/views";
 
 export default function CosmeticSurgery() {
-    const {
-        stream,
-        error: webcamError,
-        restartStream,
-        detectionResults,
-        setCurrentView,
-    } = useWebcam();
-    const { setIsLoading } = useLoading();
-    const [error, setError] = useState<string | null>(null);
-    const [isVideoReady, setIsVideoReady] = useState(false);
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const animationFrameId = useRef<number | null>(null);
-    const lastDetectTime = useRef(0);
-    const [result, setResult] = useState<string | null>(null);
-    const [topPoint, setTopPoint] = useState<NormalizedLandmark | null>(null);
-  
-    useEffect(() => {
-        setCurrentView(VIEWS.COSMETIC_SURGERY)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+  const {
+    stream,
+    error: webcamError,
+    restartStream,
+    detectionResults,
+    setCurrentView,
+  } = useWebcam();
+  const { setIsLoading } = useLoading();
+  const [error, setError] = useState<string | null>(null);
+  const [isVideoReady, setIsVideoReady] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const animationFrameId = useRef<number | null>(null);
+  const lastDetectTime = useRef(0);
+  const [result, setResult] = useState<string | null>(null);
+  const [topPoint, setTopPoint] = useState<NormalizedLandmark | null>(null);
 
-    // Kết nối video stream
-    useEffect(() => {
-        if (stream && videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.onloadedmetadata = () => {
-                videoRef.current!.play().catch((err) => {
-                    console.error("[PersonalColor] Error playing video:", err);
-                });
-                setIsVideoReady(true);
-                setIsLoading(false);
-            };
-        }
-    }, [stream, setIsLoading, restartStream]);
+  useEffect(() => {
+    setCurrentView(VIEWS.COSMETIC_SURGERY);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Kết nối video stream
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.onloadedmetadata = () => {
+        videoRef.current!.play().catch((err) => {
+          console.error("[PersonalColor] Error playing video:", err);
+        });
+        setIsVideoReady(true);
+        setIsLoading(false);
+      };
+    }
+  }, [stream, setIsLoading, restartStream]);
 
   useEffect(() => {
     if (!stream || !canvasRef.current || !videoRef.current || !isVideoReady) {
-      console.log(
-          "[PersonalColor] Waiting for FaceLandmarker or webcam...");
+      console.log("[PersonalColor] Waiting for FaceLandmarker or webcam...");
       return;
     }
 
@@ -60,8 +59,8 @@ export default function CosmeticSurgery() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
-        setError("Failed to initialize canvas.");
-        return;
+      setError("Failed to initialize canvas.");
+      return;
     }
 
     const buildResult = (
@@ -69,6 +68,7 @@ export default function CosmeticSurgery() {
       noseWidth: number | null,
       foreheadWidth: number | null,
       jawWidth: number | null,
+      topHeadToEyebrowsDistance: number | null,
       eyebrowsToNoseDistance: number | null,
       noseToChinDistance: number | null
     ) => {
@@ -78,7 +78,8 @@ export default function CosmeticSurgery() {
         !foreheadWidth ||
         !jawWidth ||
         !eyebrowsToNoseDistance ||
-        !noseToChinDistance
+        !noseToChinDistance ||
+        !topHeadToEyebrowsDistance
       ) {
         setResult(null);
 
@@ -89,6 +90,9 @@ export default function CosmeticSurgery() {
         mouthWidth / noseWidth
       ).toFixed(3)}</p>`;
       _result += `<p> The suggestion ratio is 1.618</p>`;
+      if (mouthWidth / noseWidth < 1.5) {
+        _result += `<p> Suggestion: Consider narrowing the width of your nose for a more balanced ratio.</p>`;
+      }
 
       _result += `<p> - Ratio between your jaw and forehead is: ${(
         jawWidth / foreheadWidth
@@ -98,6 +102,11 @@ export default function CosmeticSurgery() {
       _result += `<p> - Ratio between the distance from eyebrows to nose and the distance from nose to chin is: ${(
         noseToChinDistance / eyebrowsToNoseDistance
       ).toFixed(3)}</p>`;
+
+      _result += `<p> - Ratio between the distance from top of head to nose and the distance from eyebrows to nose is: ${(
+        topHeadToEyebrowsDistance / eyebrowsToNoseDistance
+      ).toFixed(3)}</p>`;
+
       _result += `<p> The suggestion ratio is 1</p>`;
       setResult(_result);
     };
@@ -263,6 +272,7 @@ export default function CosmeticSurgery() {
       ctx.lineTo(point2.x * canvas.width, point2.y * canvas.height);
       ctx.stroke();
       ctx.setLineDash([]); // Reset to solid line
+      return calculateDistance(point1, point2);
     };
 
     const drawingFaceGrid = (landmarks: NormalizedLandmark[]) => {
@@ -318,8 +328,14 @@ export default function CosmeticSurgery() {
         mb1 as NormalizedLandmark,
         { ...mb2, y: mb2.y - 0.1 } as NormalizedLandmark
       );
-      drawDashedLineBetweenPoints(landmarks[152], landmarks[58]);
-      drawDashedLineBetweenPoints(landmarks[152], landmarks[288]);
+
+      const topHeadToEyebrowsDistance = drawDashedLineBetweenPoints(
+        topPoint as NormalizedLandmark,
+        ma1 as NormalizedLandmark
+      ); // Đường thẳng từ đỉnh đầu đến giữa lông mày
+
+      drawDashedLineBetweenPoints(landmarks[152], landmarks[58]); // Đường thẳng từ cằm đến má phải
+      drawDashedLineBetweenPoints(landmarks[152], landmarks[288]); // Đường thẳng từ cằm đến má trái
 
       const angle = calculateAngleBetweenLines(
         landmarks[152],
@@ -334,13 +350,22 @@ export default function CosmeticSurgery() {
         { ...landmarks[152], y: landmarks[152].y + 0.05 } as NormalizedLandmark,
         "green"
       );
-      buildResult(_mouthWidth, _noseWidth, _foreHeadWidth, _jewWidth, d1, d2);
+      buildResult(
+        _mouthWidth,
+        _noseWidth,
+        _foreHeadWidth,
+        _jewWidth,
+        topHeadToEyebrowsDistance,
+        d1,
+        d2
+      );
     };
 
     const detect = async () => {
       try {
         const now = performance.now();
-        const minInterval = detectionResults.face?.faceLandmarks?.length > 0 ? 33 : 100;
+        const minInterval =
+          detectionResults.face?.faceLandmarks?.length > 0 ? 33 : 100;
         if (now - lastDetectTime.current < minInterval) {
           animationFrameId.current = requestAnimationFrame(detect);
           return;
@@ -363,7 +388,10 @@ export default function CosmeticSurgery() {
           offsetX = (canvas.width - drawWidth) / 2;
         }
         ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
-        if (detectionResults?.face?.faceLandmarks && detectionResults?.face?.faceLandmarks.length > 0) {
+        if (
+          detectionResults?.face?.faceLandmarks &&
+          detectionResults?.face?.faceLandmarks.length > 0
+        ) {
           const landmarks = detectionResults?.face?.faceLandmarks[0];
           // analyzeFace(landmarks);
           drawingFaceGrid(landmarks);
