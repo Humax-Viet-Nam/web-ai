@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable react/display-name */
-// src/components/page/PersonalColor.tsx
+// src/components/page/CosmeticSurgery.tsx
 
 "use client";
 

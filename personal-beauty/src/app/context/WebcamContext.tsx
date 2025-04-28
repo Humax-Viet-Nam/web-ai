@@ -47,9 +47,7 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const animationFrameId = useRef<number | null>(null);
   const lastDetectTime = useRef(0);
   const lastPositionBeforeFist = useRef<{ x: number; y: number } | null>(null);
-  const smoothPosition = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const cursorRef = useRef<HTMLDivElement>(null);
-  const ALPHA = 0.3;
   const [handData, setHandData] = useState<HandData>({
     isHandDetected: false,
     cursorPosition: { x: 0, y: 0 },
@@ -59,6 +57,7 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isHandDetectionEnabled, setIsHandDetectionEnabled] = useState(true); // Đặt mặc định là false
   const [isIndexFingerRaised, setIsIndexFingerRaised] = useState(false);
   const [detectionResults, setDetectionResults] = useState<{ [key: string]: any }>({});
+
   const modelRequirements: { [key: string]: string[] } = {
     [VIEWS.PERSONAL_COLOR]: ["hand", "face"],
     [VIEWS.PERSONAL_BODY_TYPE]: ["pose"],
@@ -110,31 +109,27 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const clampedX = Math.max(0, Math.min(adjustedX, window.innerWidth - 1));
     const clampedY = Math.max(0, Math.min(adjustedY, window.innerHeight - 1));
 
-    let currentPosition: { x: number; y: number };
-
     if (isFist && lastPositionBeforeFist.current) {
-      // Giữ tọa độ cuối cùng trước khi nắm tay
-      currentPosition = lastPositionBeforeFist.current;
-    } else {
-      // Làm mịn tọa độ khi tay mở
-      currentPosition = {
-        x: Math.round((ALPHA * clampedX + (1 - ALPHA) * smoothPosition.current.x) * 100) / 100,
-        y: Math.round((ALPHA * clampedY + (1 - ALPHA) * smoothPosition.current.y) * 100) / 100,
+      // Nếu đang nắm tay: giữ nguyên vị trí trước khi fist
+      return {
+        isHandDetected: true,
+        cursorPosition: lastPositionBeforeFist.current,
+        isFist,
+        isOpenHand,
+        isIndexRaised,
       };
-      lastPositionBeforeFist.current = currentPosition; // Lưu tọa độ trước khi nắm tay
+    } else {
+      // Khi không fist: cập nhật vị trí mới
+      const currentPosition = { x: clampedX, y: clampedY };
+      lastPositionBeforeFist.current = currentPosition;
+      return {
+        isHandDetected: true,
+        cursorPosition: currentPosition,
+        isFist,
+        isOpenHand,
+        isIndexRaised,
+      };
     }
-
-    smoothPosition.current = currentPosition;
-
-    //console.log("[detectFull] cursorPosition:", currentPosition);
-
-    return {
-      isHandDetected: true,
-      cursorPosition: currentPosition,
-      isFist,
-      isOpenHand,
-      isIndexRaised,
-    };
   }, [detectGesture]);
 
   const startStream = async () => {
@@ -147,6 +142,22 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         },
       });
       setStream(mediaStream);
+
+      mediaStream.getVideoTracks().forEach((track) => {
+        track.addEventListener("ended", async () => {
+          console.warn("[WebcamProvider] Video track ended. Restarting...");
+          await restartStream();
+        });
+        track.addEventListener("mute", async () => {
+          console.warn("[WebcamProvider] Video track muted. Restarting...");
+          await restartStream();
+        });
+        track.addEventListener("inactive", async () => {
+          console.warn("[WebcamProvider] Video track inactive. Restarting...");
+          await restartStream();
+        });
+      });
+
     } catch (err) {
       console.error("[WebcamProvider] Error accessing webcam:", err);
       setError("Failed to access webcam. Please check your camera permissions.");
@@ -183,7 +194,7 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     workerRef.current = new Worker(new URL("../worker/VisionWorker.ts", import.meta.url));
     workerRef.current.onmessage = (e: MessageEvent) => {
       const { type, results } = e.data;
-      console.log("[WebcamContext] Worker message:", { type, results });
+      //console.log("[WebcamContext] Worker message:", { type, results });
       if (type === "detectionResult") {
         if (results?.hand?.landmarks?.length > 0) {
           const landmarks = results.hand.landmarks[0];
@@ -192,11 +203,6 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setHandData(detected);
           setDetectionResults(results);
           setIsIndexFingerRaised(isIndexRaised);
-
-          if (cursorRef.current && isHandDetectionEnabled) {
-            cursorRef.current.style.transform = `translate(${detected.cursorPosition.x}px, ${detected.cursorPosition.y}px)`;
-          }
-          //console.log("[WebcamContext] Hand detected:", detected);
         } else {
           setHandData({
             isHandDetected: false,
@@ -261,13 +267,19 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       lastDetectTime.current = now;
 
-      if (video.readyState < 4) {
+      if (video.readyState < 4 || video.paused) {
+        console.warn("[WebcamProvider] Video not ready or paused, skipping frame.");
         animationFrameId.current = requestAnimationFrame(detect);
         return;
       }
 
       try {
         const imageBitmap = await createImageBitmap(video);
+        if (imageBitmap.width === 0 || imageBitmap.height === 0) {
+          console.warn("[WebcamProvider] Empty ImageBitmap, skipping frame.");
+          animationFrameId.current = requestAnimationFrame(detect);
+          return;
+        }
         const modelTypes = modelRequirements[currentView] || ["hand"];
 
         workerRef.current!.postMessage({

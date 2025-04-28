@@ -57,7 +57,7 @@ const SelectionButton = React.memo(
     return (
       <button
         ref={buttonRef}
-        className={`area-button text-2xl font-semibold min-h-[123px] px-8 py-4 rounded-xl transition-all duration-300 transform shadow-lg ${selectedArea === area
+        className={`area-button text-2xl min-h-[123px] font-semibold px-8 py-4 rounded-xl transition-all duration-300 transform shadow-lg ${selectedArea === area
           ? "bg-pink-600 text-white scale-105 border-4 border-pink-300"
           : "bg-gray-200 text-gray-800 hover:bg-gray-300 hover:scale-105"
           }`}
