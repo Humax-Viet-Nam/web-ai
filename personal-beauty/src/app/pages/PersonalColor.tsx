@@ -4,8 +4,7 @@
 
 "use client";
 
-import React from "react";
-import { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import AnalysisLayout from "../components/AnalysisLayout";
 import { useWebcam } from "../context/WebcamContext";
@@ -13,16 +12,23 @@ import { useLoading } from "../context/LoadingContext";
 import { useHandControl } from "../context/HandControlContext";
 import { VIEWS } from "../constants/views";
 
-// Ánh xạ vùng và các landmarks tương ứng
 const AREA_LANDMARKS: { [key: string]: number[] } = {
-    hair: [10, 151, 152, 148, 149], // Vùng tóc
-    lips: [0, 13, 14, 17, 18], // Vùng môi
-    face: [1, 10, 152, 234, 454], // Toàn bộ khuôn mặt
-    pupil: [33, 133, 362, 263], // Vùng mắt (đồng tử)
-    eyebrow: [70, 63, 300, 293], // Vùng lông mày
+    face: [1, 10, 152, 234, 454],
+    hair: [10, 151, 152, 148, 149],
+    lips: [0, 13, 14, 17, 18],
+    pupil: [33, 133, 362, 263],
+    eyebrow: [70, 63, 300, 293],
 };
 
-// Component con để quản lý từng nút
+// Màu sắc và kiểu dáng cho từng vùng
+const AREA_STYLES: { [key: string]: { color: string; glowColor: string } } = {
+    face: { color: "#1E90FF", glowColor: "rgba(30, 144, 255, 0.5)" }, // Xanh lam
+    hair: { color: "#FFD700", glowColor: "rgba(255, 215, 0, 0.5)" }, // Vàng
+    lips: { color: "#FF69B4", glowColor: "rgba(255, 105, 180, 0.5)" }, // Hồng
+    pupil: { color: "#32CD32", glowColor: "rgba(50, 205, 50, 0.5)" }, // Xanh lá
+    eyebrow: { color: "#8A2BE2", glowColor: "rgba(138, 43, 226, 0.5)" }, // Tím
+};
+
 const SelectionButton = React.memo(
     ({ area, selectedArea, setSelectedArea }: { area: string; selectedArea: string | null; setSelectedArea: (area: string) => void }) => {
         const { registerElement, unregisterElement, isHandDetectionEnabled } = useHandControl();
@@ -34,12 +40,10 @@ const SelectionButton = React.memo(
             if (!button) return;
 
             if (isHandDetectionEnabled && !isRegistered.current) {
-                //console.log("[SelectionButton] Registering button:", button.dataset.area);
                 button.classList.add("hoverable");
                 registerElement(button);
                 isRegistered.current = true;
             } else if (!isHandDetectionEnabled && isRegistered.current) {
-                //console.log("[SelectionButton] Unregistering button:", button.dataset.area);
                 button.classList.remove("hoverable");
                 unregisterElement(button);
                 isRegistered.current = false;
@@ -47,7 +51,6 @@ const SelectionButton = React.memo(
 
             return () => {
                 if (isRegistered.current && button) {
-                    //console.log("[SelectionButton] Cleanup - Unregistering button:", button.dataset.area);
                     button.classList.remove("hoverable");
                     unregisterElement(button);
                     isRegistered.current = false;
@@ -59,8 +62,8 @@ const SelectionButton = React.memo(
             <button
                 ref={buttonRef}
                 className={`area-button text-2xl min-h-[123px] font-semibold px-8 py-4 rounded-xl transition-all duration-300 transform shadow-lg ${selectedArea === area
-                    ? "bg-pink-600 text-white scale-105 border-4 border-pink-300"
-                    : "bg-gray-200 text-gray-800 hover:bg-gray-300 hover:scale-105"
+                        ? "bg-pink-600 text-white scale-105 border-4 border-pink-300"
+                        : "bg-gray-200 text-gray-800 hover:bg-gray-300 hover:scale-105"
                     }`}
                 data-area={area}
                 onClick={() => setSelectedArea(area)}
@@ -83,15 +86,27 @@ export default function PersonalColor() {
     const [colorTone, setColorTone] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isVideoReady, setIsVideoReady] = useState(false);
-    const [selectedArea, setSelectedArea] = useState<string | null>(null);
+    const [selectedArea, setSelectedArea] = useState<string | null>("face");
     const [selectedColor, setSelectedColor] = useState<string | null>(null);
+    const [landmarkHistory, setLandmarkHistory] = useState<{ x: number; y: number }[][]>([]);
+    const [isFrameStable, setIsFrameStable] = useState(false);
+    const [statusMessage, setStatusMessage] = useState<string>("Initializing camera...");
+    const [progress, setProgress] = useState<number>(0);
+    const [noFaceDetectedDuration, setNoFaceDetectedDuration] = useState<number>(0);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const displayVideoRef = useRef<HTMLVideoElement>(null);
     const animationFrameId = useRef<number | null>(null);
-    const lastDetectTime = useRef(0);
+    const lastDrawTime = useRef(0);
+    const lastStableTime = useRef<number | null>(null);
+    const lastUnstableTime = useRef<number | null>(null);
+    const pulseTime = useRef(0); // Thời gian cho hiệu ứng nhấp nháy
 
-    // Danh sách khu vực và bảng màu đề xuất
-    const areas = ["hair", "lips", "face", "pupil", "eyebrow"];
+    const STABILITY_THRESHOLD = 15;
+    const HISTORY_SIZE = 5;
+    const STABILITY_DURATION = 1000;
+    const MIN_STABLE_DURATION = 500;
+
+    const areas = ["face", "hair", "lips", "pupil", "eyebrow"];
     const colorPalette = {
         warm: [
             { color: "#FFD700", label: "Best" },
@@ -120,7 +135,7 @@ export default function PersonalColor() {
                         ))}
                     </div>
                 </div>
-          </div>
+            </div>
         ),
         [selectedArea, setSelectedArea]
     );
@@ -132,7 +147,8 @@ export default function PersonalColor() {
                 {palette.map((item, index) => (
                     <div key={index} className="flex items-center gap-3">
                         <button
-                            className="color-button w-10 h-10 rounded-full border-2 border-gray-300"
+                            className={`color-button w-10 h-10 rounded-full border-2 transition-transform duration-200 ${selectedColor === item.color ? "border-pink-500 scale-110" : "border-gray-300 hover:scale-105"
+                                }`}
                             style={{ backgroundColor: item.color }}
                             data-color={item.color}
                             onClick={() => setSelectedColor(item.color)}
@@ -142,22 +158,46 @@ export default function PersonalColor() {
                 ))}
             </div>
         ),
-        [palette, setSelectedColor]
+        [palette, selectedColor]
     );
 
     const actionButtons = useMemo(
         () => (
             <>
+                {noFaceDetectedDuration > 30000 && (
+                    <button
+                        className="bg-blue-500 text-white px-12 py-6 rounded-lg text-3xl hover:bg-blue-600 transition relative mb-2"
+                        onClick={async () => {
+                            setStatusMessage("Refreshing camera...");
+                            setProgress(50);
+                            await restartStream();
+                            setStatusMessage("Initializing camera...");
+                            setProgress(20);
+                            setNoFaceDetectedDuration(0);
+                        }}
+                    >
+                        Refresh
+                    </button>
+                )}
                 <button
-                    className="bg-pink-500 text-white px-12 py-6 rounded-lg text-3xl hover:bg-pink-600 transition"
+                    className={`bg-pink-500 text-white px-12 py-6 rounded-lg text-3xl hover:bg-pink-600 transition relative ${!colorTone ? "opacity-50 cursor-not-allowed" : ""
+                        }`}
+                    disabled={!colorTone}
                     onClick={() => {
+                        if (!colorTone) return;
                         const canvas = canvasRef.current;
                         if (canvas) {
+                            setStatusMessage("Saving image...");
+                            setProgress(80);
                             const dataUrl = canvas.toDataURL("image/png");
                             const link = document.createElement("a");
                             link.href = dataUrl;
                             link.download = "personal-color-result.png";
                             link.click();
+                            setTimeout(() => {
+                                setStatusMessage("Analysis completed!");
+                                setProgress(100);
+                            }, 500);
                         }
                     }}
                 >
@@ -165,15 +205,13 @@ export default function PersonalColor() {
                 </button>
             </>
         ),
-        []
+        [colorTone, noFaceDetectedDuration, restartStream]
     );
 
     useEffect(() => {
         setCurrentView(VIEWS.PERSONAL_COLOR);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Kết nối video stream
     useEffect(() => {
         if (stream && displayVideoRef.current) {
             displayVideoRef.current.srcObject = stream;
@@ -183,11 +221,12 @@ export default function PersonalColor() {
                 });
                 setIsVideoReady(true);
                 setIsLoading(false);
+                setStatusMessage("Please keep your face steady for analysis");
+                setProgress(20);
             };
         }
     }, [stream, setIsLoading]);
 
-    // Hàm phân tích tông màu từ ImageData
     const analyzeColorTone = (imageData: ImageData): string => {
         const data = imageData.data;
         let r = 0,
@@ -225,10 +264,77 @@ export default function PersonalColor() {
         return "Neutral";
     };
 
-    // Xử lý vẽ video, phân tích tông màu, và vẽ landmarks
+    const checkFrameStability = (landmarks: { x: number; y: number }[]) => {
+        setLandmarkHistory((prev) => {
+            const newHistory = [...prev, landmarks].slice(-HISTORY_SIZE);
+
+            if (!detectionResults.face?.faceLandmarks) {
+                setNoFaceDetectedDuration((prev) => prev + 1000);
+                if (noFaceDetectedDuration >= 30000) {
+                    setStatusMessage("Face not detected for a long time. Please refresh the camera.");
+                } else {
+                    setStatusMessage("Face not detected. Please adjust your position.");
+                }
+                setProgress(0);
+                setIsFrameStable(false);
+                return [];
+            }
+
+            setNoFaceDetectedDuration(0);
+
+            if (newHistory.length < HISTORY_SIZE) {
+                setStatusMessage("Collecting face data...");
+                setProgress(20);
+                return newHistory;
+            }
+
+            let totalDeviation = 0;
+            let deviationCount = 0;
+
+            for (let i = 1; i < newHistory.length; i++) {
+                for (let j = 0; j < landmarks.length; j++) {
+                    const dx = (newHistory[i][j].x - newHistory[i - 1][j].x) * 640;
+                    const dy = (newHistory[i][j].y - newHistory[i - 1][j].y) * 480;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    totalDeviation += distance;
+                    deviationCount++;
+                }
+            }
+
+            const averageDeviation = deviationCount > 0 ? totalDeviation / deviationCount : 0;
+            const now = performance.now();
+
+            const isStable = averageDeviation < STABILITY_THRESHOLD;
+
+            if (isStable && !lastStableTime.current) {
+                lastStableTime.current = now;
+                setStatusMessage("Analyzing color tone...");
+                setProgress(60);
+            } else if (isStable && lastStableTime.current && now - lastStableTime.current >= STABILITY_DURATION) {
+                setIsFrameStable(true);
+                setStatusMessage("Analysis completed!");
+                setProgress(100);
+                lastUnstableTime.current = null;
+            } else if (!isStable) {
+                if (lastStableTime.current && (now - lastStableTime.current < MIN_STABLE_DURATION)) {
+                    return newHistory;
+                }
+                if (!lastUnstableTime.current) {
+                    lastUnstableTime.current = now;
+                }
+                lastStableTime.current = null;
+                setIsFrameStable(false);
+                setStatusMessage("Please keep your face steady for analysis");
+                setProgress(20);
+            }
+
+            return newHistory;
+        });
+    };
+
     useEffect(() => {
         if (!stream || !canvasRef.current || !displayVideoRef.current || !isVideoReady) {
-            console.log("[PersonalColor] Waiting for FaceLandmarker or webcam...", stream, canvasRef.current, displayVideoRef.current, isVideoReady);
+            console.log("[PersonalColor] Waiting for FaceLandmarker or webcam...");
             return;
         }
 
@@ -240,90 +346,131 @@ export default function PersonalColor() {
             return;
         }
 
-        // Hàm vẽ landmarks
-        const drawLandmarks = (landmarks: { x: number; y: number }[], indices: number[]) => {
-            ctx.fillStyle = "red";
-            ctx.strokeStyle = "red";
-            ctx.lineWidth = 2;
-
-            indices.forEach((index) => {
-                if (landmarks[index]) {
-                    const x = landmarks[index].x * drawWidth + offsetX;
-                    const y = landmarks[index].y * drawHeight + offsetY;
-                    ctx.beginPath();
-                    ctx.arc(x, y, 3, 0, 2 * Math.PI);
-                    ctx.fill();
-                    ctx.stroke();
-                }
-            });
-        };
-
         let drawWidth: number, drawHeight: number, offsetX: number, offsetY: number;
 
         const draw = async () => {
-            try {
-                const now = performance.now();
-                const minInterval = detectionResults.face?.faceLandmarks?.length > 0 ? 33 : 100;
-                if (now - lastDetectTime.current < minInterval) {
-                    animationFrameId.current = requestAnimationFrame(draw);
-                    return;
-                }
-                lastDetectTime.current = now;
+            const now = performance.now();
+            if (now - lastDrawTime.current < 1000 / 60) { // Giới hạn 60 FPS
+                animationFrameId.current = requestAnimationFrame(draw);
+                return;
+            }
+            lastDrawTime.current = now;
 
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Cập nhật thời gian cho hiệu ứng nhấp nháy
+            pulseTime.current += 0.05;
+            const pulse = 1 + 0.2 * Math.sin(pulseTime.current); // Hiệu ứng nhấp nháy nhẹ
 
-                const videoAspect = video.videoWidth / video.videoHeight;
-                const canvasAspect = canvas.width / canvas.height;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                if (videoAspect > canvasAspect) {
-                    drawWidth = canvas.width;
-                    drawHeight = canvas.width / videoAspect;
-                    offsetX = 0;
-                    offsetY = (canvas.height - drawHeight) / 2;
-                } else {
-                    drawHeight = canvas.height;
-                    drawWidth = canvas.height * videoAspect;
-                    offsetY = 0;
-                    offsetX = (canvas.width - drawWidth) / 2;
-                }
+            const videoAspect = video.videoWidth / video.videoHeight;
+            const canvasAspect = canvas.width / canvas.height;
+            if (videoAspect > canvasAspect) {
+                drawWidth = canvas.width;
+                drawHeight = canvas.width / videoAspect;
+                offsetX = 0;
+                offsetY = (canvas.height - drawHeight) / 2;
+            } else {
+                drawHeight = canvas.height;
+                drawWidth = canvas.height * videoAspect;
+                offsetX = (canvas.width - drawWidth) / 2;
+                offsetY = 0;
+            }
 
-                // Vẽ video
-                ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+            if (detectionResults && detectionResults.face?.faceLandmarks && detectionResults.face?.faceLandmarks.length > 0) {
+                const landmarks = detectionResults.face?.faceLandmarks[0];
+                checkFrameStability(landmarks);
 
-                if (detectionResults && detectionResults.face?.faceLandmarks && detectionResults.face?.faceLandmarks.length > 0) {
-                    const landmarks = detectionResults.face?.faceLandmarks[0];
+                if (isFrameStable && selectedArea && AREA_LANDMARKS[selectedArea]) {
+                    const points: { x: number; y: number }[] = [];
 
-                    // Phân tích tông màu từ vùng mặt
-                    const faceLandmarks = AREA_LANDMARKS["face"];
-
-                    if (landmarks && faceLandmarks) {
-                        // Tính vùng bao quanh các landmarks của mặt
-                        const xs = faceLandmarks.map((index) => landmarks[index]?.x * drawWidth + offsetX).filter((x) => x !== undefined);
-                        const ys = faceLandmarks.map((index) => landmarks[index]?.y * drawHeight + offsetY).filter((y) => y !== undefined);
-                        const minX = Math.min(...xs);
-                        const maxX = Math.max(...xs);
-                        const minY = Math.min(...ys);
-                        const maxY = Math.max(...ys);
-
-                        // Trích xuất ImageData từ vùng mặt
-                        const width = maxX - minX;
-                        const height = maxY - minY;
-                        if (width > 0 && height > 0) {
-                            const imageData = ctx.getImageData(minX, minY, width, height);
-                            const tone = analyzeColorTone(imageData);
-                            console.log("[PersonalColor] Detected color tone:", tone);
-                            setColorTone(tone); // Chỉ cập nhật nếu có dữ liệu mới
+                    // Thu thập tọa độ các điểm landmark
+                    AREA_LANDMARKS[selectedArea].forEach((index) => {
+                        if (landmarks[index]) {
+                            const x = landmarks[index].x * drawWidth + offsetX;
+                            const y = landmarks[index].y * drawHeight + offsetY;
+                            points.push({ x, y });
                         }
+                    });
+
+                    if (points.length > 0) {
+                        const style = AREA_STYLES[selectedArea] || { color: "#FFFFFF", glowColor: "rgba(255, 255, 255, 0.5)" };
+
+                        // Vẽ đường cong kết nối các điểm
+                        ctx.beginPath();
+                        ctx.strokeStyle = style.color;
+                        ctx.lineWidth = 2;
+                        ctx.shadowBlur = 10;
+                        ctx.shadowColor = style.glowColor;
+
+                        ctx.moveTo(points[0].x, points[0].y);
+                        for (let i = 1; i < points.length - 1; i++) {
+                            const xc = (points[i].x + points[i + 1].x) / 2;
+                            const yc = (points[i].y + points[i + 1].y) / 2;
+                            ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+                        }
+                        if (points.length > 1) {
+                            ctx.quadraticCurveTo(
+                                points[points.length - 1].x,
+                                points[points.length - 1].y,
+                                points[points.length - 1].x,
+                                points[points.length - 1].y
+                            );
+                        }
+                        ctx.stroke();
+
+                        // Reset shadow để không ảnh hưởng đến các phần vẽ khác
+                        ctx.shadowBlur = 0;
+                        ctx.shadowColor = "transparent";
+
+                        // Vẽ các điểm landmark với hiệu ứng nhấp nháy
+                        points.forEach((point) => {
+                            ctx.beginPath();
+                            ctx.fillStyle = style.color;
+                            ctx.strokeStyle = style.color;
+                            ctx.lineWidth = 1;
+                            ctx.shadowBlur = 15;
+                            ctx.shadowColor = style.glowColor;
+                            const radius = 4 * pulse; // Bán kính thay đổi theo hiệu ứng nhấp nháy
+                            ctx.arc(point.x, point.y, radius, 0, 2 * Math.PI);
+                            ctx.fill();
+                            ctx.stroke();
+                            ctx.shadowBlur = 0; // Reset shadow
+                        });
+
+                        // Vẽ nhãn cho vùng đang phân tích
+                        const labelX = points[0].x + 20;
+                        const labelY = points[0].y - 20;
+                        ctx.font = "16px Arial";
+                        ctx.fillStyle = style.color;
+                        ctx.shadowBlur = 5;
+                        ctx.shadowColor = style.glowColor;
+                        ctx.fillText(selectedArea.charAt(0).toUpperCase() + selectedArea.slice(1), labelX, labelY);
+                        ctx.shadowBlur = 0;
                     }
 
-                    // Vẽ landmarks dựa trên vùng được chọn
-                    if (selectedArea && AREA_LANDMARKS[selectedArea]) {
-                        drawLandmarks(landmarks, AREA_LANDMARKS[selectedArea]);
+                    // Phân tích tông màu dựa trên vùng "face"
+                    const faceLandmarks = AREA_LANDMARKS["face"];
+                    const xs = faceLandmarks.map((index) => landmarks[index]?.x * drawWidth + offsetX).filter((x) => x !== undefined);
+                    const ys = faceLandmarks.map((index) => landmarks[index]?.y * drawHeight + offsetY).filter((y) => y !== undefined);
+                    const minX = Math.min(...xs);
+                    const maxX = Math.max(...xs);
+                    const minY = Math.min(...ys);
+                    const maxY = Math.max(...ys);
+                    const width = maxX - minX;
+                    const height = maxY - minY;
+                    if (width > 0 && height > 0) {
+                        const imageData = ctx.getImageData(minX, minY, width, height);
+                        const tone = analyzeColorTone(imageData);
+                        setColorTone(tone);
                     }
                 }
-                // Không reset colorTone khi không phát hiện khuôn mặt
-            } catch (err) {
-                console.error("[PersonalColor] Error during face detection:", err);
+
+                if (isFrameStable && selectedColor) {
+                    ctx.fillStyle = selectedColor;
+                    ctx.beginPath();
+                    ctx.arc(50, 50, 20, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
             }
 
             animationFrameId.current = requestAnimationFrame(draw);
@@ -336,7 +483,17 @@ export default function PersonalColor() {
                 cancelAnimationFrame(animationFrameId.current);
             }
         };
-    }, [stream, isVideoReady, detectionResults]);
+    }, [stream, isVideoReady, detectionResults, selectedArea, selectedColor]);
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            if (!detectionResults || !detectionResults.face?.faceLandmarks) {
+                setNoFaceDetectedDuration((prev) => prev + 1000);
+            }
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [detectionResults]);
 
     return (
         <AnalysisLayout
@@ -346,9 +503,12 @@ export default function PersonalColor() {
             canvasRef={canvasRef}
             result={colorTone}
             error={error || webcamError}
+            detectionResults={detectionResults}
             selectionButtons={selectionButtons}
             colorPalette={colorPaletteElement}
             actionButtons={actionButtons}
+            statusMessage={statusMessage}
+            progress={progress}
         />
     );
 }
