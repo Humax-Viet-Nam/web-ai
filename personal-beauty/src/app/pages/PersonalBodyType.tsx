@@ -1,356 +1,443 @@
-/* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable react/display-name */
-// src/components/page/PersonalColor.tsx
-
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// src/pages/PersonalColor.tsx
 "use client";
 
-import React from "react";
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
+import {
+    DrawingUtils,
+    FilesetResolver,
+    PoseLandmarker,
+} from "@mediapipe/tasks-vision";
 import AnalysisLayout from "../components/AnalysisLayout";
 import { useWebcam } from "../context/WebcamContext";
-import { useLoading } from "../context/LoadingContext";
+import { useLoading } from "../context/LoadingContext"; // Thêm import
 import { useHandControl } from "../context/HandControlContext";
-import { VIEWS } from "../constants/views";
 
-// Ánh xạ vùng và các landmarks tương ứng
-const AREA_LANDMARKS: { [key: string]: number[] } = {
-  hair: [10, 151, 152, 148, 149], // Vùng tóc
-  lips: [0, 13, 14, 17, 18], // Vùng môi
-  face: [1, 10, 152, 234, 454], // Toàn bộ khuôn mặt
-  pupil: [33, 133, 362, 263], // Vùng mắt (đồng tử)
-  eyebrow: [70, 63, 300, 293], // Vùng lông mày
-};
-
-// Component con để quản lý từng nút
-const SelectionButton = React.memo(
-  ({ area, selectedArea, setSelectedArea }: { area: string; selectedArea: string | null; setSelectedArea: (area: string) => void }) => {
-    const { registerElement, unregisterElement, isHandDetectionEnabled } = useHandControl();
-    const buttonRef = useRef<HTMLButtonElement>(null);
-    const isRegistered = useRef(false);
+export default function PersonalColor() {
+    const { stream, error: webcamError, restartStream } = useWebcam();
+    const { setIsLoading } = useLoading(); // Sử dụng context
+    const { registerElement, unregisterElement } = useHandControl();
+    const [error, setError] = useState<string | null>(null);
+    const [isPoseLandmarkerReady, setIsPoseLandmarkerReady] = useState(false);
+    const [isVideoReady, setIsVideoReady] = useState(false);
+    const [isFaceDetectionActive, setIsFaceDetectionActive] = useState(true); // Thêm trạng thái chế độ
+    const [statusMessage, setStatusMessage] = useState("Face Detection Active"); // Thêm thông báo trạng thái
+    const [twoFingersProgress, setTwoFingersProgress] = useState(0); // Thêm tiến trình giơ 2 ngón tay
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
+    const displayVideoRef = useRef<HTMLVideoElement>(null);
+    const animationFrameId = useRef<number | null>(null);
+    const [bodySuggestion, setBodySuggestion] = useState<any | null>(null);
+    const lastDetectTime = useRef(0);
 
     useEffect(() => {
-      const button = buttonRef.current;
-      if (!button) return;
+        const initializePoseLandmarker = async () => {
+            try {
+                const filesetResolver = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm"
+                );
+                const poseLandmarker: PoseLandmarker =
+                    await PoseLandmarker.createFromOptions(filesetResolver, {
+                        baseOptions: {
+                            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task`,
+                            delegate: "GPU",
+                        },
+                        runningMode: "VIDEO",
+                        numPoses: 1,
+                        minPoseDetectionConfidence: 0.9,
+                        minPosePresenceConfidence: 0.9,
+                        minTrackingConfidence: 0.9,
+                    });
 
-      if (isHandDetectionEnabled && !isRegistered.current) {
-        //console.log("[SelectionButton] Registering button:", button.dataset.area);
-        button.classList.add("hoverable");
-        registerElement(button);
-        isRegistered.current = true;
-      } else if (!isHandDetectionEnabled && isRegistered.current) {
-        //console.log("[SelectionButton] Unregistering button:", button.dataset.area);
-        button.classList.remove("hoverable");
-        unregisterElement(button);
-        isRegistered.current = false;
-      }
+                poseLandmarkerRef.current = poseLandmarker;
+                setIsPoseLandmarkerReady(true);
+            } catch (err) {
+                console.error(
+                    "[PersonalColor] Error initializing FaceLandmarker:",
+                    err
+                );
+                setError("Failed to initialize face detection.");
+            }
+        };
 
-      return () => {
-        if (isRegistered.current && button) {
-          //console.log("[SelectionButton] Cleanup - Unregistering button:", button.dataset.area);
-          button.classList.remove("hoverable");
-          unregisterElement(button);
-          isRegistered.current = false;
+        initializePoseLandmarker();
+
+        return () => {
+            if (poseLandmarkerRef.current) {
+                poseLandmarkerRef.current.close();
+                poseLandmarkerRef.current = null;
+            }
+            setIsPoseLandmarkerReady(false);
+            if (animationFrameId.current) {
+                cancelAnimationFrame(animationFrameId.current);
+            }
+        };
+    }, []);
+
+    type Landmark = { x: number; y: number; z?: number };
+
+    function distance(a: Landmark, b: Landmark): number {
+        return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+    }
+
+    function getClosestLandmarkOnY(
+        landmarks: Landmark[],
+        targetY: number,
+        side: "left" | "right"
+    ): Landmark {
+        // Lọc điểm theo bên trái hoặc phải
+        const sideLandmarks = landmarks.filter((_, index) => {
+            if (side === "left")
+                return [11, 13, 15, 23, 25, 27].includes(index);
+            else return [12, 14, 16, 24, 26, 28].includes(index);
+        });
+
+        // Tìm điểm có Y gần nhất với targetY
+        return sideLandmarks.reduce((closest, landmark) =>
+            Math.abs(landmark.y - targetY) < Math.abs(closest.y - targetY)
+                ? landmark
+                : closest
+        );
+    }
+
+    function analyzeBodyShape(landmarks: Landmark[]): string {
+        if (landmarks.length < 33) return "Không đủ dữ liệu";
+
+        const leftShoulder = landmarks[11];
+        const rightShoulder = landmarks[12];
+        const leftHip = landmarks[23];
+        const rightHip = landmarks[24];
+        const leftHand = landmarks[15];
+        const rightHand = landmarks[16];
+        const head = landmarks[0];
+        const leftAnkle = landmarks[27];
+        const rightAnkle = landmarks[28];
+
+        const shoulderWidth = distance(leftShoulder, rightShoulder);
+        const hipWidth = distance(leftHip, rightHip);
+        const handWidth = distance(leftHand, rightHand);
+        const bodyHeight = distance(head, {
+            x: (leftAnkle.x + rightAnkle.x) / 2,
+            y: (leftAnkle.y + rightAnkle.y) / 2,
+            z: 0,
+        });
+        const legLength = distance(
+            {
+                x: (leftHip.x + rightHip.x) / 2,
+                y: (leftHip.y + rightHip.y) / 2,
+                z: 0,
+            },
+            {
+                x: (leftAnkle.x + rightAnkle.x) / 2,
+                y: (leftAnkle.y + rightAnkle.y) / 2,
+                z: 0,
+            }
+        );
+
+        const ratio = shoulderWidth / handWidth;
+        const legRatio = legLength / bodyHeight;
+
+        const suggestions = [];
+
+        const waistY =
+            (leftShoulder.y + leftHip.y + rightShoulder.y + rightHip.y) / 4;
+
+        // Lấy điểm bên trái/phải gần eo nhất
+        const leftWaist = getClosestLandmarkOnY(landmarks, waistY, "left");
+        const rightWaist = getClosestLandmarkOnY(landmarks, waistY, "right");
+
+        // Tính khoảng cách eo thực tế
+        const waistWidth = Math.abs(rightWaist.x - leftWaist.x);
+
+        if (
+            Math.abs(shoulderWidth - hipWidth) < 0.05 &&
+            Math.abs(waistWidth - shoulderWidth) > 0.1
+        ) {
+            suggestions.push("Dáng đồng hồ cát");
+        } else if (Math.abs(shoulderWidth - handWidth) < 0.02) {
+            suggestions.push("Dáng cân đối (chữ nhật)");
+        } else if (ratio > 1.1) {
+            suggestions.push("Dáng tam giác ngược");
+        } else if (ratio < 0.9) {
+            suggestions.push("Dáng tam giác xuôi");
+        } else {
+            suggestions.push("Khó xác định dáng cụ thể");
         }
-      };
-    }, [registerElement, unregisterElement, isHandDetectionEnabled]);
+
+        if (legRatio > 0.55) {
+            suggestions.push("Chân dài");
+        } else if (legRatio < 0.45) {
+            suggestions.push("Chân ngắn");
+        } else {
+            suggestions.push("Tỷ lệ cân đối");
+        }
+
+        return suggestions.join("<br/>");
+    }
+
+    // function analyzeBodyShape(landmarks: Landmark[]): string {
+    //     if (landmarks.length < 25) return "Không đủ dữ liệu để phân tích";
+    //     const suggestions: string[] = [];
+
+    //     const leftShoulder = landmarks[11];
+    //     const rightShoulder = landmarks[12];
+    //     const leftHip = landmarks[23];
+    //     const rightHip = landmarks[24];
+
+    //     const shoulderWidth = Math.abs(rightShoulder.x - leftShoulder.x);
+    //     const hipWidth = Math.abs(rightHip.x - leftHip.x);
+    //     const waistWidth = ((shoulderWidth + hipWidth) / 2) * 0.8; // Ước lượng eo
+
+    //     // Tỉ lệ để xác định dáng
+    //     const ratio = shoulderWidth / hipWidth;
+
+    //     if (
+    //         Math.abs(shoulderWidth - hipWidth) < 0.05 &&
+    //         Math.abs(waistWidth - shoulderWidth) > 0.1
+    //     ) {
+    //         suggestions.push(
+    //             "Đồng hồ cát - bạn phù hợp với trang phục ôm sát và nhấn eo"
+    //         );
+    //     } else if (ratio > 1.1) {
+    //         suggestions.push(
+    //             "Tam giác ngược - nên chọn trang phục làm nổi bật phần thân dưới"
+    //         );
+    //     } else if (ratio < 0.9) {
+    //         suggestions.push(
+    //             "Tam giác xuôi - nên làm nổi bật phần thân trên, dùng áo vai phồng"
+    //         );
+    //     } else {
+    //         suggestions.push("Chữ nhật - nên chọn đồ tạo đường cong, thắt eo");
+    //     }
+
+    //     const headY = landmarks[0].y;
+    //     const hipY = (landmarks[23].y + landmarks[24].y) / 2;
+    //     const ankleY = (landmarks[27].y + landmarks[28].y) / 2;
+
+    //     const bodyHeight = ankleY - headY;
+    //     const legLength = ankleY - hipY;
+    //     const legRatio = legLength / bodyHeight;
+
+    //     // 1. Gợi ý phong cách tổng thể
+    //     if (legRatio > 0.55) {
+    //         suggestions.push(
+    //             "Bạn có đôi chân dài, phù hợp với váy dài, quần ống rộng hoặc váy xẻ tà."
+    //         );
+    //     } else if (legRatio < 0.45) {
+    //         suggestions.push(
+    //             "Chân bạn khá ngắn so với tổng thể, nên chọn quần cạp cao, váy ngắn hoặc giày cao gót để tăng chiều cao thị giác."
+    //         );
+    //     } else {
+    //         suggestions.push(
+    //             "Tỷ lệ chân - thân cân đối, bạn có thể linh hoạt lựa chọn đa dạng phong cách."
+    //         );
+    //     }
+
+    //     if (shoulderWidth > 0.25) {
+    //         suggestions.push(
+    //             "Vai bạn khá rộng, nên chọn áo cổ vuông, áo trễ vai."
+    //         );
+    //     } else if (shoulderWidth < 0.15) {
+    //         suggestions.push(
+    //             "Vai nhỏ, bạn có thể thử áo có cầu vai hoặc tay phồng để tạo cân đối."
+    //         );
+    //     } else {
+    //         suggestions.push("Vai cân đối, dễ phối nhiều kiểu áo.");
+    //     }
+
+    //     return suggestions.join("<br/>");
+    // }
+
+    // Kết nối video stream
+    useEffect(() => {
+        if (stream && displayVideoRef.current) {
+            displayVideoRef.current.srcObject = stream;
+            displayVideoRef.current.play().catch((err) => {
+                console.error("[PersonalBody] Error playing video:", err);
+            });
+
+            const checkVideoReady = () => {
+                if (
+                    displayVideoRef.current &&
+                    displayVideoRef.current.readyState >= 4
+                ) {
+                    setIsVideoReady(true);
+                    setIsLoading(false); // Tắt loading qua context
+                } else {
+                    setTimeout(checkVideoReady, 500);
+                }
+            };
+
+            checkVideoReady();
+        }
+    }, [stream, setIsLoading]);
+
+    useEffect(() => {
+        if (
+            !isPoseLandmarkerReady ||
+            !stream ||
+            !canvasRef.current ||
+            !displayVideoRef.current ||
+            !isFaceDetectionActive
+        ) {
+            return;
+        }
+        const video = displayVideoRef.current;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) {
+            setError("Failed to initialize canvas.");
+            return;
+        }
+
+        const drawingUtils = new DrawingUtils(ctx);
+
+        const waitForVideoReady = async () => {
+            let retries = 5;
+            while (retries > 0 && video.readyState < 4) {
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+                retries--;
+                if (video.readyState < 4) {
+                    await restartStream();
+                }
+            }
+            if (video.readyState < 4) {
+                setError("Failed to load webcam video for face detection.");
+                return false;
+            }
+            return true;
+        };
+
+        const detect = async () => {
+            if (!poseLandmarkerRef.current) {
+                animationFrameId.current = requestAnimationFrame(detect);
+                return;
+            }
+
+            const isVideoReady = await waitForVideoReady();
+            if (!isVideoReady) {
+                return;
+            }
+
+            try {
+                const now = performance.now();
+                if (now - lastDetectTime.current < 120) {
+                    // 10 FPS
+                    animationFrameId.current = requestAnimationFrame(detect);
+                    return;
+                }
+
+                lastDetectTime.current = now;
+                // ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                // const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const results = poseLandmarkerRef.current.detectForVideo(
+                    video,
+                    now
+                );
+                if (results.landmarks && results.landmarks.length > 0) {
+                    const landmarks = results.landmarks[0];
+                    const suggestion = analyzeBodyShape(landmarks);
+
+                    // Làm sạch canvas trước khi vẽ
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    const videoAspect = video.videoWidth / video.videoHeight;
+                    const canvasAspect = canvas.width / canvas.height;
+
+                    let drawWidth, drawHeight, offsetX, offsetY;
+
+                    if (videoAspect > canvasAspect) {
+                        drawWidth = canvas.width;
+                        drawHeight = canvas.width / videoAspect;
+                        offsetX = 0;
+                        offsetY = (canvas.height - drawHeight) / 2;
+                    } else {
+                        drawHeight = canvas.height;
+                        drawWidth = canvas.height * videoAspect;
+                        offsetY = 0;
+                        offsetX = (canvas.width - drawWidth) / 2;
+                    }
+
+                    ctx.drawImage(
+                        video,
+                        offsetX,
+                        offsetY,
+                        drawWidth,
+                        drawHeight
+                    );
+
+                    let lastVideoTime = -1;
+                    let startTimeMs = performance.now();
+                    if (lastVideoTime !== video.currentTime) {
+                        lastVideoTime = video.currentTime;
+
+                        poseLandmarkerRef.current.detectForVideo(
+                            video,
+                            startTimeMs,
+                            (result) => {
+                                ctx.save();
+                                ctx.clearRect(
+                                    0,
+                                    0,
+                                    canvas.width,
+                                    canvas.height
+                                );
+                                for (const landmark of result.landmarks) {
+                                    drawingUtils.drawLandmarks(landmark, {
+                                        radius: (data) =>
+                                            DrawingUtils.lerp(
+                                                data.from!.z,
+                                                -0.15,
+                                                0.1,
+                                                5,
+                                                1
+                                            ),
+                                    });
+                                    drawingUtils.drawConnectors(
+                                        landmark,
+                                        PoseLandmarker.POSE_CONNECTIONS
+                                    );
+                                }
+                                ctx.restore();
+                            }
+                        );
+                    }
+
+                    setStatusMessage("ok");
+
+                    setBodySuggestion(`${suggestion}`);
+                } else {
+                    setBodySuggestion(null);
+                }
+            } catch (err) {
+                console.error(
+                    "[PersonalMakeup] Error during face mesh detection:",
+                    err
+                );
+            }
+
+            animationFrameId.current = requestAnimationFrame(detect);
+        };
+
+        detect();
+
+        return () => {
+            if (animationFrameId.current) {
+                cancelAnimationFrame(animationFrameId.current);
+            }
+        };
+    }, [isPoseLandmarkerReady, stream, restartStream]);
 
     return (
-      <button
-        ref={buttonRef}
-        className={`area-button text-2xl min-h-[123px] font-semibold px-8 py-4 rounded-xl transition-all duration-300 transform shadow-lg ${selectedArea === area
-          ? "bg-pink-600 text-white scale-105 border-4 border-pink-300"
-          : "bg-gray-200 text-gray-800 hover:bg-gray-300 hover:scale-105"
-          }`}
-        data-area={area}
-        onClick={() => setSelectedArea(area)}
-      >
-        {area.charAt(0).toUpperCase() + area.slice(1)}
-      </button>
+        <AnalysisLayout
+            title="Personal Body"
+            description="Analyze your personal body using live video."
+            videoRef={displayVideoRef}
+            canvasRef={canvasRef}
+            result={bodySuggestion}
+            error={error || webcamError}
+            statusMessage={statusMessage} // Truyền statusMessage
+            progress={twoFingersProgress} // Truyền progress
+        />
     );
-  }
-);
-
-
-export default function PersonalBodyType() {
-  const {
-    stream,
-    error: webcamError,
-    restartStream,
-    detectionResults,
-    setCurrentView,
-  } = useWebcam();
-  const { setIsLoading } = useLoading();
-  const [colorTone, setColorTone] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isVideoReady, setIsVideoReady] = useState(false);
-  const [selectedArea, setSelectedArea] = useState<string | null>(null);
-  const [selectedColor, setSelectedColor] = useState<string | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const displayVideoRef = useRef<HTMLVideoElement>(null);
-  const animationFrameId = useRef<number | null>(null);
-  const lastDetectTime = useRef(0);
-
-  // Danh sách khu vực và bảng màu đề xuất
-  const areas = ["hair", "lips", "face", "pupil", "eyebrow"];
-  const colorPalette = {
-    warm: [
-      { color: "#FFD700", label: "Best" },
-      { color: "#FF4500", label: "Best" },
-      { color: "#8B0000", label: "Worst" },
-    ],
-    cool: [
-      { color: "#00CED1", label: "Best" },
-      { color: "#FF69B4", label: "Best" },
-      { color: "#FFA500", label: "Worst" },
-    ],
-    neutral: [
-      { color: "#C0C0C0", label: "Best" },
-      { color: "#F5F5DC", label: "Best" },
-      { color: "#FF0000", label: "Worst" },
-    ],
-  };
-
-  useEffect(() => {
-    setCurrentView(VIEWS.PERSONAL_COLOR)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const selectionButtons = useMemo(
-    () => (
-      <div className="md:w-2/12 p-1 rounded-xl flex flex-col max-h-[calc(100vh-64px)] overflow-hidden">
-        <div className="flex flex-col flex-wrap gap-3 w-full h-full">
-          <div className="flex flex-col gap-6">
-            {areas.map((area) => (
-              <SelectionButton key={area} area={area} selectedArea={selectedArea} setSelectedArea={setSelectedArea} />
-            ))}
-          </div>
-        </div>
-      </div>
-    ),
-    [selectedArea, setSelectedArea]
-  );
-
-  const palette = colorTone ? colorPalette[colorTone.toLowerCase() as keyof typeof colorPalette] : [];
-  const colorPaletteElement = useMemo(
-    () => (
-      <div className="flex flex-col gap-3">
-        {palette.map((item, index) => (
-          <div key={index} className="flex items-center gap-3">
-            <button
-              className="color-button w-10 h-10 rounded-full border-2 border-gray-300"
-              style={{ backgroundColor: item.color }}
-              data-color={item.color}
-              onClick={() => setSelectedColor(item.color)}
-            />
-            <span className="text-base font-medium text-gray-700">{item.label}</span>
-          </div>
-        ))}
-      </div>
-    ),
-    [palette, setSelectedColor]
-  );
-
-  const actionButtons = useMemo(
-    () => (
-      <>
-        <button
-          className="bg-pink-500 text-white px-12 py-6 rounded-lg text-3xl hover:bg-pink-600 transition"
-          onClick={() => {
-            const canvas = canvasRef.current;
-            if (canvas) {
-              const dataUrl = canvas.toDataURL("image/png");
-              const link = document.createElement("a");
-              link.href = dataUrl;
-              link.download = "personal-color-result.png";
-              link.click();
-            }
-          }}
-        >
-          Capture
-        </button>
-      </>
-    ),
-    []
-  );
-
-  // Kết nối video stream
-  useEffect(() => {
-    if (stream && displayVideoRef.current) {
-      displayVideoRef.current.srcObject = stream;
-      displayVideoRef.current.onloadedmetadata = () => {
-        displayVideoRef.current!.play().catch((err) => {
-          console.error("[PersonalColor] Error playing video:", err);
-        });
-        setIsVideoReady(true);
-        setIsLoading(false);
-      };
-    }
-  }, [stream, setIsLoading]);
-
-  // Hàm phân tích tông màu từ ImageData (giữ nguyên đoạn code gốc)
-  const analyzeColorTone = (imageData: ImageData): string => {
-    const data = imageData.data;
-    let r = 0,
-      g = 0,
-      b = 0;
-
-    for (let i = 0; i < data.length; i += 4) {
-      r += data[i];
-      g += data[i + 1];
-      b += data[i + 2];
-    }
-
-    const pixelCount = data.length / 4;
-    r = r / pixelCount;
-    g = g / pixelCount;
-    b = b / pixelCount;
-
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    let h = 0;
-
-    const d = max - min;
-
-    if (max === min) {
-      h = 0;
-    } else {
-      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
-      else if (max === g) h = (b - r) / d + 2;
-      else h = (r - g) / d + 4;
-      h /= 6;
-    }
-
-    if (h < 0.1 || h > 0.9) return "Warm";
-    if (h > 0.3 && h < 0.6) return "Cool";
-    return "Neutral";
-  };
-
-  // Xử lý vẽ video, phân tích tông màu, và vẽ landmarks
-  useEffect(() => {
-    if (!stream || !canvasRef.current || !displayVideoRef.current || !isVideoReady) {
-      console.log(
-        "[PersonalColor] Waiting for FaceLandmarker or webcam...");
-      return;
-    }
-
-    const video = displayVideoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      setError("Failed to initialize canvas.");
-      return;
-    }
-
-    // Hàm vẽ landmarks
-    const drawLandmarks = (landmarks: { x: number; y: number }[], indices: number[]) => {
-      ctx.fillStyle = "red";
-      ctx.strokeStyle = "red";
-      ctx.lineWidth = 2;
-
-      indices.forEach((index) => {
-        if (landmarks[index]) {
-          const x = landmarks[index].x * drawWidth + offsetX;
-          const y = landmarks[index].y * drawHeight + offsetY;
-          ctx.beginPath();
-          ctx.arc(x, y, 3, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.stroke();
-        }
-      });
-    };
-
-    let drawWidth: number, drawHeight: number, offsetX: number, offsetY: number;
-
-    const draw = async () => {
-      try {
-        const now = performance.now();
-        const minInterval = detectionResults.face?.faceLandmarks?.length > 0 ? 33 : 100;
-        if (now - lastDetectTime.current < minInterval) {
-          animationFrameId.current = requestAnimationFrame(draw);
-          return;
-        }
-        lastDetectTime.current = now;
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        const videoAspect = video.videoWidth / video.videoHeight;
-        const canvasAspect = canvas.width / canvas.height;
-
-        if (videoAspect > canvasAspect) {
-          drawWidth = canvas.width;
-          drawHeight = canvas.width / videoAspect;
-          offsetX = 0;
-          offsetY = (canvas.height - drawHeight) / 2;
-        } else {
-          drawHeight = canvas.height;
-          drawWidth = canvas.height * videoAspect;
-          offsetY = 0;
-          offsetX = (canvas.width - drawWidth) / 2;
-        }
-
-        // Vẽ video
-        ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
-
-        if (detectionResults && detectionResults.face?.faceLandmarks && detectionResults.face?.faceLandmarks.length > 0) {
-          const landmarks = detectionResults.face?.faceLandmarks[0];
-
-          // Phân tích tông màu từ vùng mặt
-          const faceLandmarks = AREA_LANDMARKS["face"];
-
-          if (landmarks && faceLandmarks) {
-            // Tính vùng bao quanh các landmarks của mặt
-            const xs = faceLandmarks.map((index) => landmarks[index]?.x * drawWidth + offsetX).filter((x) => x !== undefined);
-            const ys = faceLandmarks.map((index) => landmarks[index]?.y * drawHeight + offsetY).filter((y) => y !== undefined);
-            const minX = Math.min(...xs);
-            const maxX = Math.max(...xs);
-            const minY = Math.min(...ys);
-            const maxY = Math.max(...ys);
-
-            // Trích xuất ImageData từ vùng mặt
-            const width = maxX - minX;
-            const height = maxY - minY;
-            if (width > 0 && height > 0) {
-              const imageData = ctx.getImageData(minX, minY, width, height);
-              const tone = analyzeColorTone(imageData);
-              console.log("[PersonalColor] Detected color tone:", tone);
-              setColorTone(tone);
-            }
-          }
-
-          // Vẽ landmarks dựa trên vùng được chọn
-          if (selectedArea && AREA_LANDMARKS[selectedArea]) {
-            drawLandmarks(landmarks, AREA_LANDMARKS[selectedArea]);
-          }
-        } else {
-          setColorTone(null);
-        }
-      } catch (err) {
-        console.error("[PersonalColor] Error during face detection:", err);
-      }
-
-      animationFrameId.current = requestAnimationFrame(draw);
-    };
-
-    draw();
-
-    return () => {
-      if (animationFrameId.current) {
-        cancelAnimationFrame(animationFrameId.current);
-      }
-    };
-  }, [stream, isVideoReady, detectionResults]);
-
-  return (
-    <AnalysisLayout
-      title="Personal Body Type"
-      description="Analyze your body type using live video."
-      videoRef={displayVideoRef}
-      canvasRef={canvasRef}
-      result={colorTone}
-      error={error || webcamError}
-      selectionButtons={selectionButtons}
-      colorPalette={colorPaletteElement}
-      actionButtons={actionButtons}
-    />
-  );
 }
