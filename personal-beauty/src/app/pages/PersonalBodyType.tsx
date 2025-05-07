@@ -5,8 +5,9 @@ import AnalysisLayout from "../components/AnalysisLayout";
 import { useWebcam } from "../context/WebcamContext";
 import { useLoading } from "../context/LoadingContext";
 import { VIEWS } from "../constants/views";
+import { DrawingUtils } from "@mediapipe/tasks-vision";
 
-export default function PersonalColor() {
+export default function PersonalBody() {
     const {
         stream,
         error: webcamError,
@@ -36,11 +37,11 @@ export default function PersonalColor() {
             displayVideoRef.current.srcObject = stream;
             displayVideoRef.current.onloadedmetadata = () => {
                 displayVideoRef.current!.play().catch((err) => {
-                    console.error("[PersonalColor] Error playing video:", err);
+                    console.error("[PersonalBody] Error playing video:", err);
                 });
                 setIsVideoReady(true);
                 setIsLoading(false);
-                setStatusMessage("Please keep your face steady for analysis");
+                setStatusMessage("Please keep your body steady for analysis");
                 setProgress(20);
             };
         }
@@ -125,26 +126,48 @@ export default function PersonalColor() {
             Math.abs(shoulderWidth - hipWidth) < 0.05 &&
             Math.abs(waistWidth - shoulderWidth) > 0.1
         ) {
-            suggestions.push("Dáng đồng hồ cát");
+            suggestions.push(
+                "Bạn có kiểu cơ thể đồng hồ cát, nên chọn váy ôm sát hoặc có thắt eo để tôn dáng và làm nổi bật vòng eo quyến rũ."
+            );
         } else if (Math.abs(shoulderWidth - handWidth) < 0.02) {
-            suggestions.push("Dáng cân đối (chữ nhật)");
+            suggestions.push(
+                "Bạn có kiểu cơ thể hình chữ nhật, hãy chọn trang phục có điểm nhấn ở eo như váy peplum hoặc áo có chiết eo để tạo đường cong mềm mại."
+            );
         } else if (ratio > 1.1) {
-            suggestions.push("Dáng tam giác ngược");
+            suggestions.push(
+                "Bạn có kiểu cơ thể tam giác ngược, nên chọn chân váy xòe hoặc quần ống rộng để cân đối với phần vai rộng."
+            );
         } else if (ratio < 0.9) {
-            suggestions.push("Dáng tam giác xuôi");
+            suggestions.push(
+                "Bạn có kiểu cơ thể tam giác xuôi, hãy chọn áo sáng màu hoặc áo có chi tiết nổi bật để thu hút sự chú ý lên phần thân trên."
+            );
+        } else if (
+            hipWidth > shoulderWidth + 0.05 &&
+            Math.abs(waistWidth - hipWidth) < 0.05
+        ) {
+            suggestions.push(
+                "Bạn có kiểu cơ thể quả lê, nên chọn trang phục làm nổi bật phần vai như áo cổ rộng, tay phồng để cân đối với phần hông."
+            );
+        } else if (
+            waistWidth > shoulderWidth + 0.05 &&
+            waistWidth > hipWidth + 0.05
+        ) {
+            suggestions.push(
+                "Bạn có kiểu cơ thể quả táo, nên chọn trang phục suông nhẹ, tránh nhấn vào vòng eo và ưu tiên kiểu dáng tạo cảm giác thon gọn."
+            );
         } else {
             suggestions.push("Khó xác định dáng cụ thể");
         }
 
         if (legRatio > 0.55) {
-            suggestions.push("Chân dài");
+            suggestions.push("Tỷ lệ cơ thể chân dài");
         } else if (legRatio < 0.45) {
-            suggestions.push("Chân ngắn");
+            suggestions.push("Tỷ lệ cơ thể chân ngắn");
         } else {
-            suggestions.push("Tỷ lệ cân đối");
+            suggestions.push("Tỷ lệ cơ thể cân đối");
         }
 
-        return suggestions.join(`<br/> ${JSON.stringify(landmarks[15])}`);
+        return suggestions.join(`<br/>`);
     }
 
     useEffect(() => {
@@ -155,7 +178,7 @@ export default function PersonalColor() {
             !isVideoReady
         ) {
             console.log(
-                "[PersonalColor] Waiting for FaceLandmarker or webcam..."
+                "[PersonalBody] Waiting for PoseLandmarker or webcam..."
             );
             return;
         }
@@ -167,6 +190,8 @@ export default function PersonalColor() {
             setError("Failed to initialize canvas.");
             return;
         }
+
+        const drawingUtils = new DrawingUtils(ctx);
 
         let drawWidth: number,
             drawHeight: number,
@@ -199,10 +224,32 @@ export default function PersonalColor() {
                 offsetY = 0;
             }
 
-            setStatusMessage("ok");
+            let lastVideoTime = -1;
+            if (lastVideoTime !== video.currentTime && detectionResults.pose) {
+                lastVideoTime = video.currentTime;
 
-            const landmarks = detectionResults.pose.landmarks[0];
-            setBodySuggestion(analyzeBodyShape(landmarks));
+                ctx.save();
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                for (const landmark of detectionResults.pose.landmarks) {
+                    drawingUtils.drawLandmarks(landmark, {
+                        radius: (data) =>
+                            DrawingUtils.lerp(data.from!.z, -0.15, 0.1, 5, 1),
+                    });
+                    drawingUtils.drawConnectors(
+                        landmark,
+                        detectionResults.pose.POSE_CONNECTIONS
+                    );
+                }
+                ctx.restore();
+            }
+
+            setStatusMessage("success");
+
+            if (detectionResults.pose && detectionResults.pose.landmarks) {
+                const landmarks = detectionResults.pose.landmarks[0];
+                setBodySuggestion(analyzeBodyShape(landmarks));
+                setProgress(100);
+            }
 
             animationFrameId.current = requestAnimationFrame(draw);
         };
@@ -218,8 +265,8 @@ export default function PersonalColor() {
 
     return (
         <AnalysisLayout
-            title="Personal Color"
-            description="Analyze your personal color tone using live video."
+            title="Personal body"
+            description="Analyze your personal body using live video."
             videoRef={displayVideoRef}
             canvasRef={canvasRef}
             result={bodySuggestion}
