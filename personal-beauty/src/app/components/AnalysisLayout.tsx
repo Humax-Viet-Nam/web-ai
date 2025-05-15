@@ -3,6 +3,7 @@
 
 "use client";
 
+import { count } from "console";
 import React, { memo, useState, useEffect, useMemo } from "react";
 import { JSX, RefObject } from "react";
 
@@ -20,6 +21,9 @@ interface AnalysisLayoutProps {
   statusMessage?: string; // Status message từ component cha (nếu có)
   guideMessage?: string;  // suport personal body type screen
   progress?: number; // Progress từ component cha (nếu có)
+  countdownActive?: boolean;
+  countdownValue?: number;
+  imageCaptured?: string
 }
 
 const AnalysisLayout = memo(
@@ -37,6 +41,9 @@ const AnalysisLayout = memo(
     statusMessage: propStatusMessage = "Initializing...",
     guideMessage,
     progress: propProgress = 0,
+    countdownActive,
+    countdownValue,
+    imageCaptured
   }: AnalysisLayoutProps) => {
     const [showError, setShowError] = useState(false);
 
@@ -140,13 +147,13 @@ const AnalysisLayout = memo(
               className="relative w-full overflow-hidden rounded-xl shadow-lg border-2 border-gray-200 bg-white" 
               style={{ paddingTop: "75%" /* 480/640 = 0.75 */ }}
             >
-              <video
+              {!imageCaptured && <video
                 ref={videoRef}
                 className="absolute inset-0 w-full h-full object-cover"
                 autoPlay
                 playsInline
                 muted
-              />
+              />}
               {statusMessage.toLowerCase().includes("hand detected") && (
                 <div className="absolute inset-0 bg-black z-[20] bg-opacity-50 flex flex-col items-center justify-center animate-pulse">
                   <svg className="w-12 h-12 text-white mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -176,7 +183,7 @@ const AnalysisLayout = memo(
                 ref={canvasRef}
                 width={640}
                 height={480}
-                className={`absolute inset-0 w-full h-full object-contain pointer-events-none ${result ? "stable" : ""}`}
+                className={`absolute inset-0 w-full h-full object-contain pointer-events-none stable`}
               />
             </div>
           </div>
@@ -292,7 +299,9 @@ const AnalysisLayout = memo(
       prevProps.statusMessage === nextProps.statusMessage &&
       prevProps.guideMessage === nextProps.guideMessage &&
       prevProps.selectionButtons === nextProps.selectionButtons &&
-      prevProps.progress === nextProps.progress
+      prevProps.progress === nextProps.progress &&
+      prevProps.countdownActive === nextProps.countdownActive &&
+      prevProps.countdownValue === nextProps.countdownValue
     );
   }
 );
