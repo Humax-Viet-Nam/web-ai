@@ -12,7 +12,7 @@ import HairSelection from "../components/HairSelection";
 import AnalysisLayout from "../components/AnalysisLayout";
 
 export default function HairColor() {
-  const { stream, setCurrentView, detectionResults, error: webcamError } = useWebcam();
+  const { stream, setCurrentView, detectionResults, error: webcamError, workerRef } = useWebcam();
   const { setIsLoading } = useLoading();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const displayVideoRef = useRef<HTMLVideoElement>(null);
@@ -31,41 +31,37 @@ export default function HairColor() {
   const HISTORY_SIZE = 5;
   const STABILITY_DURATION = 1000;
   const MIN_STABLE_DURATION = 500;
+  const STOP_DETECT = true;
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>("Initializing camera...");
   const [isFrameStable, setIsFrameStable] = useState(false);
+  const [filterComplete, setFilterComplete] = useState(false);
   const landmarkHistoryRef = useRef<any>([]);
   const [noFaceDetectedDuration, setNoFaceDetectedDuration] = useState<number>(0);
+  const lastDetectedRef = useRef<number>(null);
+  const captureRef = useRef<any>(null);
   const [progress, setProgress] = useState<number>(0);
   const lastDrawTime = useRef(0);
   const biggerPer = useRef(0);
   const isFinger = useRef(false);
+  const [countdownActive, setCountdownActive] = useState(false);
+  const [countdownValue, setCountdownValue] = useState(3);
+  const countdownStartTimeRef = useRef<number | null>(null);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [hairColorList, _setHairColorList] = useState<any[]>([
     { key: "0", name: "Jet Black", rgb: [10, 10, 10] },
     { key: "1", name: "Soft Black", rgb: [40, 30, 30] },
-    { key: "2", name: "Dark Brown", rgb: [60, 40, 30] },
-    { key: "3", name: "Chestnut Brown", rgb: [90, 60, 40] },
-    { key: "4", name: "Chocolate Brown", rgb: [120, 80, 60] },
-    { key: "5", name: "Toffee Brown", rgb: [150, 100, 80] },
-    { key: "6", name: "Caramel Brown", rgb: [170, 120, 80] },
-    { key: "7", name: "Light Brown", rgb: [200, 140, 90] },
-    { key: "8", name: "Golden Bronze", rgb: [220, 160, 60] },
-    { key: "9", name: "Golden Yellow", rgb: [255, 197, 0] },
-    { key: "10", name: "Copper Orange", rgb: [255, 130, 60] },
-    { key: "11", name: "Auburn", rgb: [170, 60, 60] },
-    { key: "12", name: "Burgundy", rgb: [120, 30, 50] },
-    { key: "13", name: "Mahogany", rgb: [160, 40, 90] },
-    { key: "14", name: "Scarlet Red", rgb: [220, 40, 60] },
-    { key: "15", name: "Magenta", rgb: [180, 60, 120] },
-    { key: "16", name: "Ash Gray", rgb: [180, 180, 180] },
-    { key: "17", name: "Platinum Blonde", rgb: [245, 245, 245] },
-    { key: "18", name: "Olive Green", rgb: [100, 120, 90] },
-    { key: "19", name: "Cool Gray", rgb: [130, 130, 130] },
+    { key: "2", name: "Dark Red", rgb: [60, 40, 30] },
+    { key: "3", name: "Soft Blue", rgb: [90, 60, 40] },
+    { key: "4", name: "Dark Green", rgb: [120, 80, 60] },
   ]);
-  const [filterHair, setSelectedHair] = useState<any>(null);
+  const [filterHair, setSelectedHair] = useState<string>("0");
   const scrollByAmount = 480;
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const buttonRefreshRef = useRef<HTMLButtonElement | null>(null);
+
   const { registerElement, unregisterElement, isHandDetectionEnabled } = useHandControl();
   const isRegistered = useRef(false);
 
@@ -84,7 +80,15 @@ export default function HairColor() {
         unregisterElement(button);
       }
     });
-  
+    if (buttonRefreshRef.current) {
+      if (isHandDetectionEnabled && !isRegistered.current) {
+        buttonRefreshRef.current!.classList.add("hoverable");
+        registerElement(buttonRefreshRef.current!);
+      } else if (!isHandDetectionEnabled && isRegistered.current) {
+        buttonRefreshRef.current!.classList.remove("hoverable");
+        unregisterElement(buttonRefreshRef.current!);
+      }
+    }
     isRegistered.current = isHandDetectionEnabled;
   
     return () => {
@@ -94,6 +98,10 @@ export default function HairColor() {
           button.classList.remove("hoverable");
           unregisterElement(button);
         });
+        if (buttonRefreshRef.current) {
+          buttonRefreshRef.current!.classList.remove("hoverable");
+        }
+        unregisterElement(buttonRefreshRef.current!);
         isRegistered.current = false;
       }
     };
@@ -154,6 +162,9 @@ export default function HairColor() {
   const onChangeSelectHair = useCallback((color: any) => {
     selectedHairColor.current = color.rgb;
     setSelectedHair(color.key);
+    if  (lastDetectedRef.current) {
+      handleResult(lastDetectedRef.current, color.key);
+    }
   }, []);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -187,6 +198,9 @@ export default function HairColor() {
   }
 
   const detectHair = () => {
+    if (STOP_DETECT) {
+      return true;
+    }
     try {
       const now = performance.now();
       if (now - lastDrawTime.current < 1000 / 60) { // Giới hạn 60 FPS
@@ -377,24 +391,121 @@ export default function HairColor() {
 
   useEffect(() => {
     if (detectionResults?.hand?.isIndexRaised) {
-      ctxRef.current?.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
-      setStatusMessage("Hand detected (index finger raised). Please lower your hand to continue analysis.");
-      setProgress(0);
       isFinger.current = true;
     } else {
       if (isFinger.current) {
         isFinger.current = false;
       }
     }
-    // const interval = setInterval(() => {
-    //   if (!detectionResults || !detectionResults.hair?.data) {
-    //     setNoFaceDetectedDuration((prev) => prev + 1000);
-    //   }
-    // }, 1000);
-
-    // return () => clearInterval(interval);
   }, [detectionResults]);
 
+  const startCountdown = useCallback(() => {
+    setCountdownActive(true);
+    setCountdownValue(3);
+    countdownStartTimeRef.current = Date.now();
+
+    // Clear any existing timer
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+    }
+
+    // Set up the countdown timer
+    countdownTimerRef.current = setInterval(() => {
+      const elapsedTime = Math.floor(
+        (Date.now() - (countdownStartTimeRef.current || 0)) / 1000
+      );
+      const newValue = 3 - elapsedTime;
+
+      if (newValue <= 0) {
+        // Countdown finished, capture the image
+        handleCapture()
+        clearInterval(countdownTimerRef.current!);
+      } else {
+        setCountdownValue(newValue);
+      }
+    }, 200); // Update more frequently for smoother countdown
+  }, []);
+
+  useEffect(() => {
+    setTimeout(() => {
+      startCountdown();
+    }, 1 * 1000);
+  }, []);
+
+  const drawInstructions = useCallback(() => {
+    const ctx = ctxRef.current;
+    const canvas = canvasRef.current;
+    if (!ctx || !canvas) {
+      return;
+    }
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear the canvas first
+    ctx.clearRect(0, 0, width, height);
+
+    // Draw face outline guide
+    const faceSize = Math.min(width, height) * 0.4;
+
+    // Create a path for the entire canvas
+    ctx.beginPath();
+    ctx.rect(0, 0, width, height);
+
+    // Create a cutout for the ellipse (face area)
+    ctx.beginPath();
+    ctx.rect(0, 0, width, height);
+    ctx.ellipse(
+      width / 2,
+      height / 2,
+      faceSize / 1.5,
+      faceSize / 1.2,
+      0,
+      0,
+      Math.PI * 2
+    );
+    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    ctx.fill("evenodd");
+
+    // Draw the ellipse outline
+    ctx.strokeStyle = "rgba(76, 175, 80, 1)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.setLineDash([10, 5]);
+    ctx.ellipse(
+      width / 2,
+      height / 2,
+      faceSize / 1.5,
+      faceSize / 1.2,
+      0,
+      0,
+      Math.PI * 2
+    );
+    ctx.stroke();
+    ctx.setLineDash([]); // Reset line dash
+
+    // Text styling
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    // Main instruction
+    ctx.font = "bold 24px Arial";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+    ctx.fillText("Look straight at the camera", width / 2, height - 80);
+    ctx.fillText("Don't blink or move", width / 2, height - 40);
+
+    // Countdown display
+    if (countdownActive) {
+      ctx.font = "bold 72px Arial";
+      ctx.fillStyle = "rgba(255, 64, 129, 0.5)";
+      ctx.fillText(countdownValue.toString(), width / 2, height / 2 + 80);
+    }
+  }, [countdownActive, countdownValue]);
+
+  // Add useEffect to redraw canvas when countdown changes
+  useEffect(() => {
+    drawInstructions();
+  }, [drawInstructions, countdownActive, countdownValue]);
+  
   useEffect(() => {
     if (!stream || !canvasRef.current || !displayVideoRef.current || !isVideoReady) {
       console.log(
@@ -404,8 +515,9 @@ export default function HairColor() {
     if (!ctxRef.current) {
       ctxRef.current = canvasRef.current?.getContext("2d");
     }
-
     detectHair();
+
+    handleResult(detectionResults);
 
     return () => {
       if (animationFrameId.current) {
@@ -429,8 +541,155 @@ export default function HairColor() {
       [filterHair]
   );
 
+  const getImageSrc = (key: string) => {
+    const store = {
+      "0": "/hair2.png",
+      "1": "/hair2.1.png",
+      "2": "/hair2.2.png",
+      "3": "/hair2.3.png",
+      "4": "/hair2.4.png",
+    } as any;
+    return store[key];
+  }
+
+  const handleResult = (results: any, filterHair?: any) => {
+    if  (!results?.face?.faceLandmarks) {
+      return;
+    }
+    const faceLandmarks = results?.face?.faceLandmarks?.[0];
+    if (!filterHair) {
+      lastDetectedRef.current = results;
+    } else {
+      ctxRef.current.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
+      const capImage = new Image();
+      capImage.src = captureRef.current;
+      capImage.onload = () => {
+        ctxRef.current.drawImage(capImage, 0, 0, canvasRef.current!.width, canvasRef.current!.height);
+        calculateImage(faceLandmarks, filterHair);
+      }
+      return;
+    }
+    calculateImage(faceLandmarks, filterHair);
+  }
+
+  const calculateImage = (faceLandmarks?: any, filterHair?: any) => {
+    const point = faceLandmarks?.[8];
+    const overlayImage = new Image();
+    overlayImage.src = getImageSrc(filterHair || "0");
+    console.log("overlayImage.src", overlayImage.src);
+    overlayImage.onload = () => {
+      const canvas = canvasRef.current;
+      const ctx = ctxRef.current;
+      if (!canvas || !ctx) {
+        console.error("Canvas or context not initialized");
+        return;
+      }
+
+      const leftCheek = faceLandmarks[234];
+      const rightCheek = faceLandmarks[454];
+      if (!leftCheek || !rightCheek) {
+        console.error("Cheek landmarks not found");
+        return;
+      }
+
+      // Calculate face width
+      const faceWidth = Math.abs(leftCheek.x - rightCheek.x) * canvas.width;
+
+      // Calculate scale
+      const baseScale = faceWidth / 720;
+      const additionalScale = 1.32;
+      const finalScale = baseScale * additionalScale;
+      const imageWidth = 720 * finalScale;
+      const imageHeight = 852 * finalScale;
+
+      // Calculate position
+      const x = point.x * canvas.width;
+      const y = point.y * canvas.height;
+      const drawX = x - imageWidth / 2;
+      const drawY = y - imageHeight / 2 - imageHeight * 0.15;
+
+      // Calculate rotation angle based on cheek landmarks
+      const deltaY = rightCheek.y - leftCheek.y;
+      const deltaX = rightCheek.x - leftCheek.x;
+      const angle = Math.atan2(deltaY, deltaX);
+
+      // Save context state
+      ctx.save();
+
+      // Translate to the center of the image, rotate, and translate back
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.translate(-x, -y);
+
+      // Draw the image
+      ctx.drawImage(overlayImage, drawX, drawY, imageWidth, imageHeight);
+
+      // Restore context state
+      ctx.restore();
+
+      setFilterComplete(true);
+      setStatusMessage("Analysis completed!");
+      setProgress(100);
+    };
+  }
+
+  const resetCountdown = useCallback(() => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setCountdownActive(false);
+    setCountdownValue(3);
+    countdownStartTimeRef.current = null;
+  }, []);
+
+  const handleCapture = async () => {
+    setMakeupSuggestion('&nbsp;');
+    if (ctxRef.current && canvasRef.current) {
+      ctxRef.current.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
+      ctxRef.current.drawImage(displayVideoRef.current, 0, 0, canvasRef.current!.width, canvasRef.current!.height);
+      captureRef.current = canvasRef.current.toDataURL("image/png");
+      const imageBitmap = await createImageBitmap(displayVideoRef.current!);
+      const now = performance.now();
+      workerRef.current!.postMessage(
+        {
+            type: "detectHair",
+            data: {
+                imageBitmap,
+                timestamp: now,
+                modelTypes: "face",
+            },
+        },
+        [imageBitmap]
+    );
+    }
+  }
+
+  const actionButtons = useMemo(
+      () => (
+          <>
+              <button
+                  className={`bg-pink-500 text-white px-12 py-6 rounded-lg text-3xl hover:bg-pink-600 transition relative opacity-0 ${filterComplete ? "opacity-100" : ""}`}
+                  ref={(el) => { buttonRefreshRef.current = el; }}
+                  onClick={() => {
+                    resetCountdown();
+                    ctxRef.current.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
+                    setTimeout(() => {
+                      setFilterComplete(false);
+                      startCountdown();
+                    }, 10);
+                  }}
+              >
+                  Refresh
+              </button>
+          </>
+      ),
+      [filterComplete]
+  );
+
   return (
     <div>
+      <div>{countdownActive}</div>
       <AnalysisLayout
           title="Hair Color"
           description="Detect and segment hair regions in video."
@@ -441,6 +700,9 @@ export default function HairColor() {
           detectionResults={detectionResults}
           selectionButtons={selectionButtons}
           statusMessage={statusMessage}
+          countdownActive={countdownActive}
+          countdownValue={countdownValue}
+          actionButtons={actionButtons}
           progress={progress}
       />
     </div>
