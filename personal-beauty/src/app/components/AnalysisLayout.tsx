@@ -23,7 +23,7 @@ interface AnalysisLayoutProps {
   progress?: number; // Progress từ component cha (nếu có)
   countdownActive?: boolean;
   countdownValue?: number;
-  imageCaptured?: string
+  capturedImage?: string | null
 }
 
 const AnalysisLayout = memo(
@@ -41,9 +41,7 @@ const AnalysisLayout = memo(
     statusMessage: propStatusMessage = "Initializing...",
     guideMessage,
     progress: propProgress = 0,
-    countdownActive,
-    countdownValue,
-    imageCaptured
+    capturedImage
   }: AnalysisLayoutProps) => {
     const [showError, setShowError] = useState(false);
 
@@ -147,7 +145,7 @@ const AnalysisLayout = memo(
               className="relative w-full overflow-hidden rounded-xl shadow-lg border-2 border-gray-200 bg-white" 
               style={{ paddingTop: "75%" /* 480/640 = 0.75 */ }}
             >
-              {!imageCaptured && <video
+              {!capturedImage && <video
                 ref={videoRef}
                 className="absolute inset-0 w-full h-full object-cover"
                 autoPlay

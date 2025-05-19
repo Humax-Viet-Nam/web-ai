@@ -4,12 +4,14 @@
 
 "use client";
 
-import { use, useCallback } from "react";
+import { use, useCallback, useMemo } from "react";
 import { useState, useEffect, useRef } from "react";
 import AnalysisLayout from "../components/AnalysisLayout";
 import { useWebcam } from "../context/WebcamContext";
 import { useLoading } from "../context/LoadingContext";
 import { VIEWS } from "../constants/views";
+import { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import { FaceWarper } from "../libs/faceWarper";
 
 export default function CosmeticSurgery() {
   const {
@@ -37,6 +39,7 @@ export default function CosmeticSurgery() {
   const [isVideoReady, setIsVideoReady] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const optimizedCanvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameId = useRef<number | null>(null);
   const lastDetectTime = useRef(0);
 
@@ -47,6 +50,14 @@ export default function CosmeticSurgery() {
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownStartTimeRef = useRef<number | null>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const [landmarks, setLandmarks] = useState<NormalizedLandmark[]>([]);
+  const [originalImageData, setOriginalImageData] = useState<ImageData | null>(
+    null
+  );
+  const [optimizedImageData, setOptimizedImageData] =
+    useState<ImageData | null>(null);
+  const [isShowOptmizedImage, setIsShowOptimizedImage] = useState(false);
+
   useEffect(() => {
     setCurrentView(VIEWS.COSMETIC_SURGERY);
   }, []);
@@ -107,7 +118,6 @@ export default function CosmeticSurgery() {
         lastStableTime.current = now;
         setStatusMessage("Analyzing face...");
         setProgress(60);
-        
       } else if (
         isStable &&
         lastStableTime.current &&
@@ -214,24 +224,17 @@ export default function CosmeticSurgery() {
 
     // Draw the current video frame to the canvas
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    // drawInstructions(ctx, canvas.width, canvas.height)
     // Get the image data URL
     const imageDataURL = canvas.toDataURL("image/jpeg");
     setCapturedImage(imageDataURL);
-
+    setLandmarks(detectionResults.face?.faceLandmarks[0] || []);
+    console.log("Set landmarks:", detectionResults.face?.faceLandmarks[0]);
     // Update status message
     setStatusMessage("Image captured successfully!");
 
     // Reset countdown
     resetCountdown();
-
-    // // After 2 seconds, reset everything to start over
-    // setTimeout(() => {
-    //   setCapturedImage(null)
-    //   setIsFrameStable(false)
-    //   lastStableTime.current = null
-    // }, 2000)
-  }, [resetCountdown]);
+  }, [resetCountdown, detectionResults.face]);
 
   useEffect(() => {
     if (capturedImage) {
@@ -244,6 +247,26 @@ export default function CosmeticSurgery() {
       };
     }
   }, [capturedImage]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (
+      !canvas ||
+      !ctx ||
+      !captureImage ||
+      !originalImageData ||
+      !landmarks.length
+    )
+      return;
+    const faceWarper = new FaceWarper(landmarks, canvas.width, canvas.height);
+    faceWarper.setOriginalImageData(originalImageData);
+    faceWarper.setParameters({ noseSize: -50 });
+    console.log("Optimizing image...");
+    setStatusMessage("Optimizing image...");
+    setOptimizedImageData(faceWarper.applyWarping(ctx));
+  }, [capturedImage, landmarks, originalImageData]);
+
   // Cleanup countdown timer on unmount
   useEffect(() => {
     return () => {
@@ -270,7 +293,7 @@ export default function CosmeticSurgery() {
   }, [stream, setIsLoading]);
 
   useEffect(() => {
-    if (!stream || !canvasRef.current || !videoRef.current || !isVideoReady) {
+    if (!stream || !canvasRef.current) {
       console.log("[PersonalColor] Waiting for FaceLandmarker or webcam...");
       return;
     }
@@ -293,23 +316,24 @@ export default function CosmeticSurgery() {
         lastDetectTime.current = now;
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        const videoRatio = video.videoWidth / video.videoHeight;
+
         const canvasRatio = canvas.width / canvas.height;
         let drawWidth = canvas.width;
         let drawHeight = canvas.height;
         let offsetX = 0;
         let offsetY = 0;
 
-        if (videoRatio > canvasRatio) {
-          drawHeight = canvas.width / videoRatio;
-          offsetY = (canvas.height - drawHeight) / 2;
-        } else {
-          drawWidth = canvas.height * videoRatio;
-          offsetX = (canvas.width - drawWidth) / 2;
-        }
         if (image) {
           ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-        } else {
+        } else if (video) {
+          const videoRatio = video.videoWidth / video.videoHeight;
+          if (videoRatio > canvasRatio) {
+            drawHeight = canvas.width / videoRatio;
+            offsetY = (canvas.height - drawHeight) / 2;
+          } else {
+            drawWidth = canvas.height * videoRatio;
+            offsetX = (canvas.width - drawWidth) / 2;
+          }
           ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
         }
 
@@ -346,75 +370,79 @@ export default function CosmeticSurgery() {
     isFrameStable,
     countdownActive,
     countdownValue,
+    optimizedImageData,
+    capturedImage,
+    isShowOptmizedImage,
+    optimizedCanvasRef,
   ]);
 
   // Draw instructions on the canvas
   const drawInstructions = useCallback(
-  (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    // Clear the canvas first
-    ctx.clearRect(0, 0, width, height);
-    
-    // Draw face outline guide
-    const faceSize = Math.min(width, height) * 0.4;
-    
-    // Create a path for the entire canvas
-    ctx.beginPath();
-    ctx.rect(0, 0, width, height);
-    
-    // Create a cutout for the ellipse (face area)
-    ctx.beginPath();
-    // First create the outer rectangle (entire canvas)
-    ctx.rect(0, 0, width, height);
-    // Then create the ellipse cutout
-    ctx.ellipse(
-      width / 2,
-      height / 2,
-      faceSize / 1.5,
-      faceSize / 1.2,
-      0,
-      0,
-      Math.PI * 2
-    );
-    // Use "evenodd" fill rule to create the cutout effect
-    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-    ctx.fill("evenodd");
-    
-    // Draw the ellipse outline
-    ctx.strokeStyle = "rgba(76, 175, 80, 1)";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.setLineDash([10, 5]);
-    ctx.ellipse(
-      width / 2,
-      height / 2,
-      faceSize / 1.5,
-      faceSize / 1.2,
-      0,
-      0,
-      Math.PI * 2
-    );
-    ctx.stroke();
-    ctx.setLineDash([]); // Reset line dash
-    
-    // Text styling
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    
-    // Main instruction
-    ctx.font = "bold 24px Arial";
-    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-    ctx.fillText("Look straight at the camera", width / 2, height - 80);
-    ctx.fillText("Don't blink or move", width / 2, height - 40);
-    
-    // Countdown display
-    if (countdownActive) {
-      ctx.font = "bold 72px Arial";
-      ctx.fillStyle = "rgba(255, 64, 129, 0.5)"; // Pink color with 0.5 opacity
-      ctx.fillText(countdownValue.toString(), width / 2, height / 2 + 80);
-    }
-  },
-  [countdownActive, countdownValue]
-);
+    (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+      // Clear the canvas first
+      ctx.clearRect(0, 0, width, height);
+
+      // Draw face outline guide
+      const faceSize = Math.min(width, height) * 0.4;
+
+      // Create a path for the entire canvas
+      ctx.beginPath();
+      ctx.rect(0, 0, width, height);
+
+      // Create a cutout for the ellipse (face area)
+      ctx.beginPath();
+      // First create the outer rectangle (entire canvas)
+      ctx.rect(0, 0, width, height);
+      // Then create the ellipse cutout
+      ctx.ellipse(
+        width / 2,
+        height / 2,
+        faceSize / 1.5,
+        faceSize / 1.2,
+        0,
+        0,
+        Math.PI * 2
+      );
+      // Use "evenodd" fill rule to create the cutout effect
+      ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+      ctx.fill("evenodd");
+
+      // Draw the ellipse outline
+      ctx.strokeStyle = "rgba(76, 175, 80, 1)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.setLineDash([10, 5]);
+      ctx.ellipse(
+        width / 2,
+        height / 2,
+        faceSize / 1.5,
+        faceSize / 1.2,
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.stroke();
+      ctx.setLineDash([]); // Reset line dash
+
+      // Text styling
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      // Main instruction
+      ctx.font = "bold 24px Arial";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+      ctx.fillText("Look straight at the camera", width / 2, height - 80);
+      ctx.fillText("Don't blink or move", width / 2, height - 40);
+
+      // Countdown display
+      if (countdownActive) {
+        ctx.font = "bold 72px Arial";
+        ctx.fillStyle = "rgba(255, 64, 129, 0.5)"; // Pink color with 0.5 opacity
+        ctx.fillText(countdownValue.toString(), width / 2, height / 2 + 80);
+      }
+    },
+    [countdownActive, countdownValue]
+  );
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -432,7 +460,7 @@ export default function CosmeticSurgery() {
       description="Analyze facial features for cosmetic surgery recommendations."
       videoRef={videoRef}
       canvasRef={canvasRef}
-      result={capturedImage ? "Image captured successfully!" : null}
+      result={null}
       error={error || webcamError}
       statusMessage={statusMessage}
       progress={progress}
