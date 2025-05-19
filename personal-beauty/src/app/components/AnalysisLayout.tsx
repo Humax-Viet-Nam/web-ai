@@ -12,6 +12,8 @@ interface AnalysisLayoutProps {
   description: string;
   videoRef: RefObject<HTMLVideoElement | null>;
   canvasRef: RefObject<HTMLCanvasElement | null>;
+  resultCanvasRef?: RefObject<HTMLCanvasElement | null>;
+  optimizedImageData?: ImageData | null;
   result: string | null;
   error: string | null;
   detectionResults?: any; // Thêm prop để nhận detectionResults
@@ -32,6 +34,7 @@ const AnalysisLayout = memo(
     description,
     videoRef,
     canvasRef,
+    resultCanvasRef,
     result,
     error,
     detectionResults,
@@ -228,6 +231,7 @@ const AnalysisLayout = memo(
                 </div>
               </div>
             )}
+            <canvas id="result-canvas" className="stable" ref={resultCanvasRef}></canvas>
             
             {colorPalette && (
               <div className="flex-1 mt-2">
@@ -299,7 +303,8 @@ const AnalysisLayout = memo(
       prevProps.selectionButtons === nextProps.selectionButtons &&
       prevProps.progress === nextProps.progress &&
       prevProps.countdownActive === nextProps.countdownActive &&
-      prevProps.countdownValue === nextProps.countdownValue
+      prevProps.countdownValue === nextProps.countdownValue &&
+      prevProps.optimizedImageData === nextProps.optimizedImageData
     );
   }
 );

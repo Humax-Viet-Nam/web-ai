@@ -39,6 +39,7 @@ export default function CosmeticSurgery() {
   const [isVideoReady, setIsVideoReady] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const resultCanvasRef = useRef<HTMLCanvasElement>(null);
   const optimizedCanvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameId = useRef<number | null>(null);
   const lastDetectTime = useRef(0);
@@ -250,21 +251,34 @@ export default function CosmeticSurgery() {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (
-      !canvas ||
-      !ctx ||
-      !captureImage ||
-      !originalImageData ||
-      !landmarks.length
-    )
+    const resultCanvas = resultCanvasRef.current;
+    if (!canvas || !resultCanvas) return;
+
+    // Set explicit sizes for both canvases
+    if (resultCanvas.width !== 640 || resultCanvas.height !== 480) {
+      resultCanvas.width = 640;
+      resultCanvas.height = 480;
+    }
+
+    const ctx = canvas.getContext("2d");
+    const resultCtx = resultCanvas.getContext("2d");
+    if (!ctx || !resultCtx || !capturedImage || !originalImageData || !landmarks.length)
       return;
+
     const faceWarper = new FaceWarper(landmarks, canvas.width, canvas.height);
     faceWarper.setOriginalImageData(originalImageData);
-    faceWarper.setParameters({ noseSize: -50 });
-    console.log("Optimizing image...");
-    setStatusMessage("Optimizing image...");
-    setOptimizedImageData(faceWarper.applyWarping(ctx));
+    faceWarper.setParameters({ noseSize: -50, cheekSize: -50, chinWidth: -50 });
+
+    // Clear the result canvas first
+    resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
+
+    const imageData = faceWarper.applyWarping(ctx);
+    if (imageData) {
+      resultCtx.putImageData(imageData, 0, 0);
+      console.log("Successfully drew optimized image to result canvas");
+    }
+
+    setOptimizedImageData(imageData);
   }, [capturedImage, landmarks, originalImageData]);
 
   // Cleanup countdown timer on unmount
@@ -325,6 +339,11 @@ export default function CosmeticSurgery() {
 
         if (image) {
           ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          if (!originalImageData) {
+            setOriginalImageData(
+              ctx.getImageData(0, 0, canvas.width, canvas.height)
+            );
+          }
         } else if (video) {
           const videoRatio = video.videoWidth / video.videoHeight;
           if (videoRatio > canvasRatio) {
@@ -455,19 +474,23 @@ export default function CosmeticSurgery() {
   }, [detectionResults]);
 
   return (
-    <AnalysisLayout
-      title="Cosmetic Surgery"
-      description="Analyze facial features for cosmetic surgery recommendations."
-      videoRef={videoRef}
-      canvasRef={canvasRef}
-      result={null}
-      error={error || webcamError}
-      statusMessage={statusMessage}
-      progress={progress}
-      detectionResults={detectionResults}
-      countdownActive={countdownActive}
-      countdownValue={countdownValue}
-      capturedImage={capturedImage}
-    />
+    <>
+      <AnalysisLayout
+        title="Cosmetic Surgery"
+        description="Analyze facial features for cosmetic surgery recommendations."
+        videoRef={videoRef}
+        canvasRef={canvasRef}
+        result={null}
+        error={error || webcamError}
+        statusMessage={statusMessage}
+        progress={progress}
+        detectionResults={detectionResults}
+        countdownActive={countdownActive}
+        countdownValue={countdownValue}
+        capturedImage={capturedImage}
+        resultCanvasRef={resultCanvasRef}
+        optimizedImageData={optimizedImageData}
+      />
+    </>
   );
 }
