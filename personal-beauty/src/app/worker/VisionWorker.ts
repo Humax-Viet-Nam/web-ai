@@ -1,7 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/app/context/VisionWorker.ts
 
-import { HandLandmarker, FaceLandmarker, PoseLandmarker, FilesetResolver, ImageSegmenter } from "@mediapipe/tasks-vision";
+import {
+  HandLandmarker,
+  FaceLandmarker,
+  PoseLandmarker,
+  FilesetResolver,
+  ImageSegmenter,
+} from "@mediapipe/tasks-vision";
 
 const models = new Map<string, any>();
 
@@ -33,13 +39,12 @@ const modelConfigs: { [key: string]: any } = {
     class: ImageSegmenter,
     options: {
       baseOptions: {
-          modelAssetPath:
-              "/models/hair_segmenter.tflite",
-          delegate: "GPU"
+        modelAssetPath: "/models/hair_segmenter.tflite",
+        delegate: "GPU",
       },
       runningMode: "VIDEO",
       outputCategoryMask: true,
-      outputConfidenceMasks: false
+      outputConfidenceMasks: false,
     },
   },
   pose: {
@@ -65,8 +70,8 @@ const INDEX_RAISED_TIMEOUT = 1500; // 1.5 giây timeout để chuyển sang các
 const isIndexRaised = (landmarks: any[]): boolean => {
   if (!landmarks || landmarks.length < 17) return false;
 
-  const p5 = landmarks[5];  // gốc ngón trỏ
-  const p8 = landmarks[8];  // đầu ngón trỏ
+  const p5 = landmarks[5]; // gốc ngón trỏ
+  const p8 = landmarks[8]; // đầu ngón trỏ
   const p12 = landmarks[12]; // đầu ngón giữa
   const p16 = landmarks[16]; // đầu ngón đeo nhẫn
 
@@ -86,6 +91,140 @@ const isIndexRaised = (landmarks: any[]): boolean => {
   return angleOk && yOk && isNotFolded;
 };
 
+// const isOkGesture = (landmarks: any[]): boolean => {
+//     if (!landmarks || landmarks.length < 21) return false;
+
+//     const thumbTip = landmarks[4];
+//     const indexTip = landmarks[8];
+//     const middleTip = landmarks[12];
+//     const ringTip = landmarks[16];
+//     const pinkyTip = landmarks[20];
+
+//     const middlePIP = landmarks[10];
+//     const ringPIP = landmarks[14];
+//     const pinkyPIP = landmarks[18];
+
+//     // Helper: tính khoảng cách 2 điểm
+//     const distance = (a: any, b: any): number => {
+//         return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+//     };
+
+//     // Tính chiều dài tương đối bàn tay (index_mcp to wrist) để chuẩn hóa ngưỡng
+//     const handScale = distance(landmarks[0], landmarks[5]);
+
+//     // 1. Ngón cái và ngón trỏ chạm nhau
+//     const thumbIndexDist = distance(thumbTip, indexTip);
+//     const thumbIndexClose = thumbIndexDist < handScale * 0.7; // ngưỡng ~40% chiều dài tay
+
+//     // 2. Ngón cái không chạm các ngón còn lại
+//     const thumbNotTouchingOthers =
+//         distance(thumbTip, middleTip) > handScale * 0.6 &&
+//         distance(thumbTip, ringTip) > handScale * 0.6 &&
+//         distance(thumbTip, pinkyTip) > handScale * 0.6;
+
+//     // 3. Các ngón giữa, áp út, út duỗi thẳng (tip cao hơn PIP - theo trục Y)
+//     const isMiddleStraight = middleTip.y < middlePIP.y;
+//     const isRingStraight = ringTip.y < ringPIP.y;
+//     const isPinkyStraight = pinkyTip.y < pinkyPIP.y;
+
+//     return (
+//         thumbIndexClose &&
+//         thumbNotTouchingOthers &&
+//         isMiddleStraight &&
+//         isRingStraight &&
+//         isPinkyStraight
+//     );
+// };
+
+const isOkGesture = (landmarks: any[]) => {
+  if (!landmarks || landmarks.length < 21) return false;
+
+  // Get relevant landmark points
+  const thumbTip = landmarks[4]; // Thumb tip
+  const indexTip = landmarks[8]; // Index finger tip
+  const middleTip = landmarks[12]; // Middle finger tip
+  const ringTip = landmarks[16]; // Ring finger tip
+  const pinkyTip = landmarks[20]; // Pinky tip
+
+  // Get base points for each finger
+  const wrist = landmarks[0]; // Wrist point
+  const middleMcp = landmarks[9]; // Middle finger base
+  const ringMcp = landmarks[13]; // Ring finger base
+  const pinkyMcp = landmarks[17]; // Pinky base
+
+  // Middle points for checking if fingers are extended
+  const middlePip = landmarks[10]; // Middle finger middle joint
+  const ringPip = landmarks[14]; // Ring finger middle joint
+  const pinkyPip = landmarks[18]; // Pinky middle joint
+
+  // 1. Check if thumb and index finger are touching
+  const distance = Math.sqrt(
+    Math.pow(thumbTip.x - indexTip.x, 2) +
+    Math.pow(thumbTip.y - indexTip.y, 2)
+  );
+
+  // Threshold for considering thumb and index are touching
+  const touchThreshold = 0.05;
+  const areTouching = distance < touchThreshold;
+
+  // 2. Check if middle finger is extended
+  const middleExtended =
+    middleTip.y < middlePip.y &&
+    calculateDistanceToWrist(middleTip, wrist) >
+    calculateDistanceToWrist(middleMcp, wrist);
+
+  // 3. Check if ring finger is extended
+  const ringExtended =
+    ringTip.y < ringPip.y &&
+    calculateDistanceToWrist(ringTip, wrist) >
+    calculateDistanceToWrist(ringMcp, wrist);
+
+  // 4. Check if pinky is extended
+  const pinkyExtended =
+    pinkyTip.y < pinkyPip.y &&
+    calculateDistanceToWrist(pinkyTip, wrist) >
+    calculateDistanceToWrist(pinkyMcp, wrist);
+
+  // All conditions must be true for OK gesture
+  return areTouching && middleExtended && ringExtended && pinkyExtended;
+};
+const calculateDistanceToWrist = (point: any, wrist: any) => {
+  return Math.sqrt(
+    Math.pow(point.x - wrist.x, 2) + Math.pow(point.y - wrist.y, 2)
+  );
+};
+
+
+async function detectModelsOnBitmap(imageBitmap: ImageBitmap, timestamp: number, modelTypes: string[] | string) {
+  const results: { [key: string]: any } = {};
+  const modelsToRun = Array.isArray(modelTypes) ? modelTypes : [modelTypes];
+  for (const modelType of modelsToRun) {
+    if (models.has(modelType)) {
+      if (modelType === "hair") {
+        const hairRaw = await models
+          .get(modelType)
+          .segmentForVideo(imageBitmap, timestamp);
+        if (hairRaw?.categoryMask) {
+          const mask = hairRaw.categoryMask;
+          const maskData = mask.getAsUint8Array();
+          results[modelType] = {
+            data: maskData,
+            width: mask.width,
+            height: mask.height,
+            timestamp,
+          };
+        }
+      } else {
+        results[modelType] = await models
+          .get(modelType)
+          .detectForVideo(imageBitmap, timestamp);
+      }
+    }
+  }
+  return results;
+}
+
+
 const handleDetect = async () => {
   if (isDetecting || frameQueue.length === 0) return;
 
@@ -99,19 +238,23 @@ const handleDetect = async () => {
   //console.log(`[VisionWorker] Start detect at ${timestamp}, modelTypes: ${modelTypes.join(", ")}`);
 
   try {
-    const results: { [key: string]: any } = {};
+    let  results: { [key: string]: any } = {};
     let indexRaised = false;
 
     // Ưu tiên phát hiện tay
     if (modelTypes.includes("hand") && models.has("hand")) {
       //console.log("[VisionWorker] Detecting hand...");
-      const handResult = await models.get("hand").detectForVideo(imageBitmap, timestamp);
+      const handResult = await models
+        .get("hand")
+        .detectForVideo(imageBitmap, timestamp);
       results.hand = handResult || { landmarks: [] };
 
       if (handResult?.landmarks?.length > 0) {
         //console.log(`[VisionWorker] Hand detected. Landmarks count: ${handResult.landmarks.length}`);
         indexRaised = isIndexRaised(handResult.landmarks[0]);
         results.hand.isIndexRaised = indexRaised;
+
+        results.hand.isOkGesture = isOkGesture(handResult.landmarks[0]);
 
         if (indexRaised) {
           lastIndexRaisedTime = timestamp;
@@ -120,6 +263,7 @@ const handleDetect = async () => {
       } else {
         //console.log("[VisionWorker] No hand landmarks detected.");
         results.hand.isIndexRaised = false;
+        results.hand.isOkGesture = false;
       }
     } else {
       results.hand = { landmarks: [], isIndexRaised: false };
@@ -127,7 +271,7 @@ const handleDetect = async () => {
 
     // Kiểm tra timeout: chỉ xử lý các mô hình khác nếu không phát hiện index raised trong 1.5 giây
     const now = timestamp;
-    if (indexRaised || (now - lastIndexRaisedTime < INDEX_RAISED_TIMEOUT)) {
+    if (indexRaised || now - lastIndexRaisedTime < INDEX_RAISED_TIMEOUT) {
       if (indexRaised) {
         //console.log("[VisionWorker] Index raised detected, skipping other models.");
       } else {
@@ -136,32 +280,37 @@ const handleDetect = async () => {
     } else {
       // Xử lý các mô hình khác nếu không phát hiện index raised hoặc timeout đã hết
       const otherModels = modelTypes.filter((m: string) => m !== "hand");
-      for (const modelType of otherModels) {
-        if (models.has(modelType)) {
-          //console.log(`[VisionWorker] Detecting ${modelType}...`);
-          if (modelType === "hair") {
-            const hairRaw = await models.get(modelType).segmentForVideo(imageBitmap, timestamp);
-            if (hairRaw?.categoryMask) {
-              const mask = hairRaw.categoryMask;
-              const maskData = mask.getAsUint8Array();
-              results[modelType] = { data: maskData, width: mask.width, height: mask.height, timestamp };
-            }
-          } else {
-            results[modelType] = await models.get(modelType).detectForVideo(imageBitmap, timestamp);
-          }
-        }
-      }
+      const otherResults = await detectModelsOnBitmap(imageBitmap, timestamp, otherModels);
+      results = { ...results, ...otherResults };
     }
 
     //console.log("[VisionWorker] Posting detection result to main thread.", results);
     self.postMessage({ type: "detectionResult", results });
   } catch (err) {
     console.error("[VisionWorker] Detection error:", err);
-    self.postMessage({ type: "detectionError", error: (err as Error).message });
+    self.postMessage({
+      type: "detectionError",
+      error: (err as Error).message,
+    });
   } finally {
     imageBitmap.close();
     isDetecting = false;
     setTimeout(() => handleDetect(), 0);
+  }
+};
+
+const handleDetectStill = async (imageBitmap: ImageBitmap, timestamp: number, modelTypes: string[] | string) => {
+  try {
+    const results = await detectModelsOnBitmap(imageBitmap, timestamp, modelTypes);
+    self.postMessage({ type: "detectionResult", results });
+  } catch (err) {
+    console.error("[VisionWorker] DetectionStill error:", err);
+    self.postMessage({
+      type: "detectionError",
+      error: (err as Error).message,
+    });
+  } finally {
+    imageBitmap.close();
   }
 };
 
@@ -172,7 +321,11 @@ self.onmessage = async (e: MessageEvent) => {
   if (type === "initialize") {
     const { modelType } = data;
     if (!modelConfigs[modelType]) {
-      self.postMessage({ type: "initialized", success: false, error: `Unknown model type: ${modelType}` });
+      self.postMessage({
+        type: "initialized",
+        success: false,
+        error: `Unknown model type: ${modelType}`,
+      });
       return;
     }
 
@@ -184,24 +337,50 @@ self.onmessage = async (e: MessageEvent) => {
 
       if (!models.has(modelType)) {
         const { class: ModelClass, options } = modelConfigs[modelType];
-        models.set(modelType, await ModelClass.createFromOptions(filesetResolver, options));
+        models.set(
+          modelType,
+          await ModelClass.createFromOptions(filesetResolver, options)
+        );
         //console.log(`[VisionWorker] Model ${modelType} initialized successfully.`);
       }
 
       self.postMessage({ type: "initialized", success: true, modelType });
     } catch (err) {
-      self.postMessage({ type: "initialized", success: false, modelType, error: (err as Error).message });
-      console.error(`[VisionWorker] Error initializing model ${modelType}:`, err);
+      self.postMessage({
+        type: "initialized",
+        success: false,
+        modelType,
+        error: (err as Error).message,
+      });
+      console.error(
+        `[VisionWorker] Error initializing model ${modelType}:`,
+        err
+      );
     }
+  }
+
+  if (type === "detectStill") {
+    const { imageBitmap, timestamp, modelTypes } = data;
+    await handleDetectStill(imageBitmap, timestamp, modelTypes);
+    return;
   }
 
   if (type === "detect") {
     const { imageBitmap, timestamp, modelTypes } = data;
-    if (frameQueue.length >= MAX_QUEUE_SIZE) {
-      console.warn("[VisionWorker] Frame queue full, dropping oldest frame.");
-      const dropped = frameQueue.shift();
-      dropped?.imageBitmap?.close();
+    // Skip frame khi worker đang bận: chỉ giữ 1 frame mới nhất trong queue
+    if (isDetecting) {
+      // Nếu queue chưa có frame thì add, nếu có rồi thì bỏ bitmap cũ, giữ frame mới nhất
+      if (frameQueue.length === 0) {
+        frameQueue.push({ imageBitmap, timestamp, modelTypes });
+      } else {
+        // Đóng frame cũ trong queue, thay bằng frame mới
+        const dropped = frameQueue.shift();
+        dropped?.imageBitmap?.close();
+        frameQueue.push({ imageBitmap, timestamp, modelTypes });
+      }
+      return; // Chờ worker xử lý xong sẽ tự gọi lại handleDetect
     }
+    // Worker rảnh: add frame vào queue rồi xử lý ngay
     frameQueue.push({ imageBitmap, timestamp, modelTypes });
     //console.log(`[VisionWorker] Frame queued. Queue size: ${frameQueue.length}`);
     handleDetect();
