@@ -745,7 +745,7 @@ export default function HairColor() {
             const now = performance.now();
             workerRef.current!.postMessage(
                 {
-                    type: "detectHair",
+                    type: "detectStill",
                     data: {
                         imageBitmap,
                         timestamp: now,
