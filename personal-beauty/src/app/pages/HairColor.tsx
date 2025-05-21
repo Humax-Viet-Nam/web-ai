@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // src/pages/HairColor.tsx
@@ -22,7 +23,7 @@ export default function HairColor() {
     const { setIsLoading } = useLoading();
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const displayVideoRef = useRef<HTMLVideoElement>(null);
-    const animationFrameId = useRef<number | null>(null);
+    const animationFrameId = useRef<number | null>(null);    
     const [makeupSuggestion, setMakeupSuggestion] = useState<any | null>(null);
     const prevAvgColorRef = useRef<{ r: number; g: number; b: number } | null>(
         null
@@ -60,11 +61,11 @@ export default function HairColor() {
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const [hairColorList, _setHairColorList] = useState<any[]>([
-        { key: "0", name: "Jet Black", rgb: [10, 10, 10] },
-        { key: "1", name: "Soft Black", rgb: [40, 30, 30] },
-        { key: "2", name: "Dark Red", rgb: [60, 40, 30] },
-        { key: "3", name: "Soft Blue", rgb: [90, 60, 40] },
-        { key: "4", name: "Dark Green", rgb: [120, 80, 60] },
+        { key: "0", name: "Crimson Glow", rgb: [255, 10, 10] },
+        { key: "1", name: "Midnight Sapphire", rgb: [10, 10, 255] },
+        { key: "2", name: "Emerald Blaze", rgb: [10, 255, 10] },
+        { key: "3", name: "Golden Sunlight", rgb: [255, 255, 10] },
+        { key: "4", name: "Smoky Quartz", rgb: [120, 80, 60] }
     ]);
     const [filterHair, setSelectedHair] = useState<string>("0");
     const scrollByAmount = 480;
@@ -610,18 +611,163 @@ export default function HairColor() {
 
     const getImageSrc = (key: string) => {
         const store = {
-            "0": "/hair2.png",
-            "1": "/hair2.1.png",
-            "2": "/hair2.2.png",
-            "3": "/hair2.3.png",
-            "4": "/hair2.4.png",
+            "0": "/hair3.png",
+            "1": "/hair3.png",
+            "2": "/hair3.png",
+            "3": "/hair3.png",
+            "4": "/hair2.png",
+            "5": "/hair2.png",
+            "6": "/hair2.png",
+            "7": "/hair2.png",
+            "8": "/hair4.png",
+            "9": "/hair4.png",
+            "10": "/hair4.png",
+            "11": "/hair4.png",
         } as any;
         return store[key];
     };
 
+    function isFrontalFace(landmarks: any) {
+        try {         
+
+            const cheekLeftOuter = landmarks[123];
+            const cheekLeftInner = landmarks[234];
+            const cheekRightOuter = landmarks[352];
+            const cheekRightInner = landmarks[454];
+            const isTurningRight = cheekLeftOuter.x < cheekLeftInner.x;
+            const isTurningLeft = cheekRightOuter.x > cheekRightInner.x;
+
+            const isFacingFront =
+                !isTurningLeft &&
+                !isTurningRight
+            console.log("isTurningRight:", isTurningRight);
+            console.log("isTurningLeft:", isTurningLeft);
+
+            return isFacingFront;
+        } catch {
+            setError("Failed to detect face landmarks.");
+        }
+    }
+
+    function rgbToHsl(r: number, g: number, b: number) {
+        r /= 255;
+        g /= 255;
+        b /= 255;
+
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h = 0, s = 0, l = (max + min) / 2;
+
+        if (max !== min) {
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+
+            switch (max) {
+                case r: h = ((g - b) / d + (g < b ? 6 : 0)); break;
+                case g: h = ((b - r) / d + 2); break;
+                case b: h = ((r - g) / d + 4); break;
+            }
+
+            h /= 6;
+        }
+
+        return [h * 360, s, l]; // h in degrees
+    }
+
+    function hslToRgb(h: number, s: number, l: number) {
+        h /= 360;
+        let r, g, b;
+
+        if (s === 0) {
+            r = g = b = l; // achromatic
+        } else {
+            const hue2rgb = (p: number, q: number, t: number) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q - p) * 6 * t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                return p;
+            };
+
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+
+            r = hue2rgb(p, q, h + 1/3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1/3);
+        }
+
+        return [r * 255, g * 255, b * 255];
+    }
+
+    const handleResultColor = (results: any, filterHair?: any) => {
+        const canvas = canvasRef.current;
+        const ctx = ctxRef.current;
+        if (!canvas || !ctx || !captureRef.current || !results?.hair?.data) return;
+        if (displayVideoRef.current) {
+            displayVideoRef.current.style.visibility = "hidden";
+        }
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const capImage = new Image();
+        capImage.src = captureRef.current;
+
+        capImage.onload = () => {
+            ctx.drawImage(capImage, 0, 0, canvas.width, canvas.height);
+
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            const maskData = results.hair.data;
+            const hairPixelIndices = [];
+
+            for (let i = 0; i < maskData.length; i++) {
+                if (maskData[i] > 0.5) {
+                    hairPixelIndices.push(i);
+                }
+            }
+
+            const selectedColor = hairColorList.find(
+                (color) => color.key === filterHair
+            )?.rgb;
+            if (selectedColor) {
+                const [targetH] = rgbToHsl(selectedColor[0], selectedColor[1], selectedColor[2]);
+
+                for (const i of hairPixelIndices) {
+                    const pixelIndex = i * 4;
+                    const r = data[pixelIndex];
+                    const g = data[pixelIndex + 1];
+                    const b = data[pixelIndex + 2];
+
+                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                    const [_, s, l] = rgbToHsl(r, g, b);
+                    const sR = Math.min(1, s * 2.8);
+                    const [newR, newG, newB] = hslToRgb(targetH, sR, l);
+
+                    data[pixelIndex] = newR;
+                    data[pixelIndex + 1] = newG;
+                    data[pixelIndex + 2] = newB;
+                }
+
+                ctx.putImageData(imageData, 0, 0);
+            }
+        };
+    };
+
     const handleResult = (results: any, filterHair?: any) => {
-        if (!results?.face?.faceLandmarks) {
+        if (!results?.face?.faceLandmarks || !captureRef.current) {
             return;
+        }
+        setStatusMessage("Analysis completed!");
+        setProgress(100);
+        if (!isFrontalFace(results.face.faceLandmarks[0])) {
+            if (!filterHair) {
+                lastDetectedRef.current = results;
+            }
+            return handleResultColor(results, filterHair || "0");
+        }
+        if (displayVideoRef.current) {
+            displayVideoRef.current.style.visibility = "hidden";
         }
         const faceLandmarks = results?.face?.faceLandmarks?.[0];
         if (!filterHair) {
@@ -650,11 +796,107 @@ export default function HairColor() {
         calculateImage(faceLandmarks, filterHair);
     };
 
-    const calculateImage = (faceLandmarks?: any, filterHair?: any) => {
+    const clamp = (value: number) => Math.max(0, Math.min(255, value));
+
+    const calculateImage = (faceLandmarks?: any, filterHair?: any, redBoost = 0) => {
         const point = faceLandmarks?.[8];
         const overlayImage = new Image();
         overlayImage.src = getImageSrc(filterHair || "0");
-        console.log("overlayImage.src", overlayImage.src);
+        overlayImage.onload = () => {
+            const canvas = canvasRef.current;
+            const ctx = ctxRef.current;
+            if (!canvas || !ctx) {
+                console.error("Canvas or context not initialized");
+                return;
+            }
+
+            const leftCheek = faceLandmarks[234];
+            const rightCheek = faceLandmarks[454];
+            if (!leftCheek || !rightCheek) {
+                console.error("Cheek landmarks not found");
+                return;
+            }
+
+            const faceWidth = Math.abs(leftCheek.x - rightCheek.x) * canvas.width;
+
+            const baseScale = faceWidth / 720;
+            const additionalScale = 1.32;
+            const finalScale = baseScale * additionalScale;
+            const imageWidth = 720 * finalScale;
+            const imageHeight = 852 * finalScale;
+
+            const x = point.x * canvas.width;
+            const y = point.y * canvas.height;
+            const drawX = x - imageWidth / 2;
+            const drawY = y - imageHeight / 2 - imageHeight * 0.10;
+
+            const deltaY = rightCheek.y - leftCheek.y;
+            const deltaX = rightCheek.x - leftCheek.x;
+            const angle = Math.atan2(deltaY, deltaX);
+
+            const tempCanvas = document.createElement("canvas");
+            tempCanvas.width = overlayImage.width;
+            tempCanvas.height = overlayImage.height;
+            const tempCtx = tempCanvas.getContext("2d");
+
+            if (!tempCtx) {
+                console.error("Temporary canvas context not initialized");
+                return;
+            }
+
+            tempCtx.drawImage(overlayImage, 0, 0);
+
+            const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            const data = imageData.data;
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+
+                const lum = 0.3 * r + 0.59 * g + 0.11 * b;
+
+                const factor = (() => {
+                    if (lum >= 64 && lum <= 192) return 1;
+                    if (lum < 64) return lum / 64;
+                    return (255 - lum) / 63;
+                })();
+
+                const redAdjust = redBoost === 100 ? 31 : (redBoost / 100) * 31;
+                const greenAdjust = redBoost === 100 ? -30 : (redBoost / 100) * -30;
+                const blueAdjust = redBoost === 100 ? -30 : (redBoost / 100) * -30;
+
+                const rb = Math.round(redAdjust * factor);
+                const gb = Math.round(greenAdjust * factor);
+                const bb = Math.round(blueAdjust * factor);
+
+                data[i] = clamp(r + rb);
+                data[i + 1] = clamp(g + gb);
+                data[i + 2] = clamp(b + bb);
+            }
+
+            tempCtx.putImageData(imageData, 0, 0);
+
+            ctx.save();
+
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            ctx.translate(-x, -y);
+
+            ctx.drawImage(tempCanvas, drawX, drawY, imageWidth, imageHeight);
+
+            ctx.restore();
+
+            setFilterComplete(true);
+            setStatusMessage("Analysis completed!");
+            setProgress(100);
+        };
+    };
+
+    const oldCalculateImage = (faceLandmarks?: any, filterHair?: any) => {
+        const point = faceLandmarks?.[8];
+        const overlayImage = new Image();
+        overlayImage.src = getImageSrc(filterHair || "0");
         overlayImage.onload = () => {
             const canvas = canvasRef.current;
             const ctx = ctxRef.current;
@@ -685,7 +927,7 @@ export default function HairColor() {
             const x = point.x * canvas.width;
             const y = point.y * canvas.height;
             const drawX = x - imageWidth / 2;
-            const drawY = y - imageHeight / 2 - imageHeight * 0.15;
+            const drawY = y - imageHeight / 2 - imageHeight * 0.10;
 
             // Calculate rotation angle based on cheek landmarks
             const deltaY = rightCheek.y - leftCheek.y;
@@ -716,6 +958,9 @@ export default function HairColor() {
         if (countdownTimerRef.current) {
             clearInterval(countdownTimerRef.current);
             countdownTimerRef.current = null;
+        }
+        if (displayVideoRef.current) {
+            displayVideoRef.current.style.visibility = "visible";
         }
         setCountdownActive(false);
         setCountdownValue(3);
@@ -749,7 +994,7 @@ export default function HairColor() {
                     data: {
                         imageBitmap,
                         timestamp: now,
-                        modelTypes: "face",
+                        modelTypes: ["face", "hair"],
                     },
                 },
                 [imageBitmap]
