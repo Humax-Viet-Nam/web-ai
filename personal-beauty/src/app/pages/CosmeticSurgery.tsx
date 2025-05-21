@@ -4,8 +4,7 @@
 
 "use client";
 
-import { use, useCallback, useMemo } from "react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import AnalysisLayout from "../components/AnalysisLayout";
 import { useWebcam } from "../context/WebcamContext";
 import { useLoading } from "../context/LoadingContext";
@@ -58,6 +57,7 @@ export default function CosmeticSurgery() {
   const [optimizedImageData, setOptimizedImageData] =
     useState<ImageData | null>(null);
   const [isShowOptmizedImage, setIsShowOptimizedImage] = useState(false);
+  const [analyzedResult, setAnalyzedResult] = useState<string | null>(null);
 
   useEffect(() => {
     setCurrentView(VIEWS.COSMETIC_SURGERY);
@@ -214,12 +214,16 @@ export default function CosmeticSurgery() {
   }, []);
 
   // Capture an image from the current video frame
-  const captureImage = useCallback(() => {
+  const captureImage = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current) return;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
+    const worker = new Worker(
+      new URL("../worker/ImageFaceDetectorWorker.ts", import.meta.url)
+    );
+    worker.postMessage({ type: "init" });
 
     if (!ctx) return;
 
@@ -227,14 +231,29 @@ export default function CosmeticSurgery() {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     // Get the image data URL
     const imageDataURL = canvas.toDataURL("image/jpeg");
-    setCapturedImage(imageDataURL);
-    setLandmarks(detectionResults.face?.faceLandmarks[0] || []);
-    console.log("Set landmarks:", detectionResults.face?.faceLandmarks[0]);
-    // Update status message
-    setStatusMessage("Image captured successfully!");
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    worker.onmessage = (e) => {
+      const { type, data } = e.data;
+      console.log("Worker message:", type, data);
+      if (type === "results") {
+        console.log("Detection results:", data);
 
-    // Reset countdown
-    resetCountdown();
+        console.log("Set landmarks:", data.faceLandmarks[0]);
+        setCapturedImage(imageDataURL);
+        setLandmarks(data.faceLandmarks[0]);
+        setProgress(100);
+      } else if (type === "initialized") {
+        worker.postMessage({
+          type: "detect",
+          imageData,
+        });
+      } else if (type === "error") {
+        console.error("Error from worker:", data);
+        setError(data.message);
+      }
+    };
+    // setLandmarks(detectionResults.face?.faceLandmarks[0] || []);
+    // Update status message
   }, [resetCountdown, detectionResults.face]);
 
   useEffect(() => {
@@ -262,12 +281,43 @@ export default function CosmeticSurgery() {
 
     const ctx = canvas.getContext("2d");
     const resultCtx = resultCanvas.getContext("2d");
-    if (!ctx || !resultCtx || !capturedImage || !originalImageData || !landmarks.length)
+    if (
+      !ctx ||
+      !resultCtx ||
+      !capturedImage ||
+      !originalImageData ||
+      !landmarks.length
+    )
       return;
 
     const faceWarper = new FaceWarper(landmarks, canvas.width, canvas.height);
     faceWarper.setOriginalImageData(originalImageData);
-    faceWarper.setParameters({ noseSize: -50, cheekSize: -50, chinWidth: -50 });
+    const {
+      chinHeight,
+      eyeDistance,
+      foreheadHeight,
+      mouthWidth,
+      noseWidth,
+      chinHeightComment,
+      eyeDistanceComment,
+      foreheadHeightComment,
+      mouthWidthComment,
+      noseWidthComment,
+      // overallHarmony,
+    } = faceWarper.calculateWarpingParametersWithFeedback();
+    // console.log("Feedback:", feedback);
+    setAnalyzedResult([chinHeightComment,
+      eyeDistanceComment,
+      foreheadHeightComment,
+      mouthWidthComment,
+      noseWidthComment].join("<br/>"));
+    faceWarper.setParameters({
+      chinHeight: chinHeight as number,
+      eyeDistance: eyeDistance as number,
+      foreheadHeight: foreheadHeight as number,
+      mouthWidth: mouthWidth as number,
+      noseWidth: noseWidth as number,
+    });
 
     // Clear the result canvas first
     resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
@@ -279,7 +329,7 @@ export default function CosmeticSurgery() {
     }
 
     setOptimizedImageData(imageData);
-  }, [capturedImage, landmarks, originalImageData]);
+  }, [capturedImage, landmarks.length, originalImageData]);
 
   // Cleanup countdown timer on unmount
   useEffect(() => {
@@ -339,6 +389,9 @@ export default function CosmeticSurgery() {
 
         if (image) {
           ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          // if (capturedImage) {
+          //   drawFacialFeaturePoints(canvas);
+          // }
           if (!originalImageData) {
             setOriginalImageData(
               ctx.getImageData(0, 0, canvas.width, canvas.height)
@@ -473,6 +526,78 @@ export default function CosmeticSurgery() {
     return () => clearInterval(interval);
   }, [detectionResults]);
 
+  function drawFacialFeaturePoints(originalCanvas: HTMLCanvasElement) {
+    const originalCtx = originalCanvas.getContext("2d");
+    if (!originalCanvas || !originalCtx) return;
+
+    // Define landmark indices for different facial features
+    const features = {
+      chin: [152, 175, 199, 200, 201, 208, 428, 429, 430, 431, 432, 433, 434],
+      cheeks: [
+        117, 118, 119, 120, 121, 347, 348, 349, 350, 351, 123, 147, 187, 207,
+        127, 162, 354, 376, 433,
+      ],
+      nose: [
+        1, 2, 3, 4, 5, 6, 168, 197, 195, 5, 4, 45, 220, 115, 114, 189, 188, 128,
+        245, 344, 278,
+      ],
+      nostrils: [
+        79, 166, 75, 77, 90, 180, 62, 78, 215, 305, 290, 392, 308, 415, 324,
+        405,
+      ],
+      noseBridge: [168, 6, 197, 195, 5, 4],
+      faceOval: [
+        10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365,
+        379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234,
+        127, 162, 21, 54, 103, 67, 109,
+      ],
+    };
+
+    // Draw different features with different colors
+    const featureColors: { [key: string]: string } = {
+      chin: "#FF0000",
+      cheeks: "#00FF00",
+      nose: "#0000FF",
+      nostrils: "#FF00FF",
+      noseBridge: "#00FFFF",
+      faceOval: "rgba(255, 255, 0, 0.5)",
+    };
+
+    // Draw points for each feature
+    for (const [feature, indices] of Object.entries(features)) {
+      originalCtx.fillStyle = featureColors[feature];
+
+      for (const idx of indices) {
+        const x = landmarks[idx].x * originalCanvas.width;
+        const y = landmarks[idx].y * originalCanvas.height;
+        originalCtx.beginPath();
+        originalCtx.arc(x, y, 2, 0, 2 * Math.PI);
+        originalCtx.fill();
+      }
+
+      // Connect points for face oval
+      if (feature === "faceOval") {
+        originalCtx.strokeStyle = featureColors[feature];
+        originalCtx.lineWidth = 1;
+        originalCtx.beginPath();
+
+        for (let i = 0; i < indices.length; i++) {
+          const idx = indices[i];
+          const x = landmarks[idx].x * originalCanvas.width;
+          const y = landmarks[idx].y * originalCanvas.height;
+
+          if (i === 0) {
+            originalCtx.moveTo(x, y);
+          } else {
+            originalCtx.lineTo(x, y);
+          }
+        }
+
+        originalCtx.closePath();
+        originalCtx.stroke();
+      }
+    }
+  }
   return (
     <>
       <AnalysisLayout
@@ -480,7 +605,7 @@ export default function CosmeticSurgery() {
         description="Analyze facial features for cosmetic surgery recommendations."
         videoRef={videoRef}
         canvasRef={canvasRef}
-        result={null}
+        result={analyzedResult}
         error={error || webcamError}
         statusMessage={statusMessage}
         progress={progress}
