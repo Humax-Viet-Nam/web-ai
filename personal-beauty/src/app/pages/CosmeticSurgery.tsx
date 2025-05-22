@@ -10,7 +10,7 @@ import { useWebcam } from "../context/WebcamContext";
 import { useLoading } from "../context/LoadingContext";
 import { VIEWS } from "../constants/views";
 import { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { FaceWarper } from "../libs/faceWarper";
+import { AnalyzedResult, FaceWarper, IDEAL_RATIOS } from "../libs/faceWarper";
 
 export default function CosmeticSurgery() {
   const {
@@ -54,13 +54,43 @@ export default function CosmeticSurgery() {
   const [originalImageData, setOriginalImageData] = useState<ImageData | null>(
     null
   );
+  const [analyzedResult, setAnalyzedResult] = useState<AnalyzedResult | null>(
+    null
+  );
   const [optimizedImageData, setOptimizedImageData] =
     useState<ImageData | null>(null);
-  const [isShowOptmizedImage, setIsShowOptimizedImage] = useState(false);
-  const [analyzedResult, setAnalyzedResult] = useState<string | null>(null);
+  const [sumary, setSummary] = useState<string | null>(null);
+  const [canvasDiemensions, setCanvasDimensions] = useState<{
+    width: number;
+    height: number;
+  }>({
+    width: 640,
+    height: 480,
+  });
 
+  // Làm rõ nét các text trên canvas
   useEffect(() => {
     setCurrentView(VIEWS.COSMETIC_SURGERY);
+    if (canvasRef.current && resultCanvasRef.current) {
+      const resultCanvas = resultCanvasRef.current;
+      const dpr = window.devicePixelRatio || 1;
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      // setCanvasDimensions({ width: rect.width * dpr, height: rect.height * dpr });
+      resultCanvas.width = rect.width * dpr;
+      resultCanvas.height = rect.height * dpr;
+      const ctx = canvas.getContext("2d");
+      const resultCtx = resultCanvas.getContext("2d");
+      if (ctx && resultCtx) {
+        ctx.scale(dpr, dpr); // scale context để nội dung không bị phóng to
+        resultCtx.scale(dpr, dpr); // scale context để nội dung không bị phóng to
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+      }
+    }
   }, []);
 
   const checkFrameStability = useCallback(
@@ -174,6 +204,197 @@ export default function CosmeticSurgery() {
     ]
   );
 
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const resultCanvas = resultCanvasRef.current;
+    if (!canvas || !resultCanvas) return;
+
+    // Set explicit sizes for both canvases
+    // if (resultCanvas.width !== 640 || resultCanvas.height !== 480) {
+    //   resultCanvas.width = 640;
+    //   resultCanvas.height = 480;
+    // }
+
+    const ctx = canvas.getContext("2d");
+    const resultCtx = resultCanvas.getContext("2d");
+    if (
+      !ctx ||
+      !resultCtx ||
+      !capturedImage ||
+      !originalImageData ||
+      !landmarks.length
+    )
+      return;
+    // makeCanvasQuality(resultCanvas, resultCtx);
+    const faceWarper = new FaceWarper(landmarks, canvas.width, canvas.height);
+    faceWarper.setOriginalImageData(originalImageData);
+    const result = faceWarper.calculateWarpingParametersWithFeedback();
+    setAnalyzedResult(result);
+    const {
+      foreheadHeightAdjustment,
+      eyeDistanceAdjustment,
+      noseWidthAdjustment,
+      noseHeightAdjustment,
+      // chinWidthAdjustment,
+      chinHeightAdjustment,
+    } = result;
+    faceWarper.setParameters({
+      foreheadHeightAdjustment: foreheadHeightAdjustment as number,
+      eyeDistanceAdjustment: eyeDistanceAdjustment as number,
+      noseWidthAdjustment: noseWidthAdjustment as number,
+      noseHeightAdjustment: noseHeightAdjustment as number,
+      // chinWidthAdjustment: chinWidthAdjustment as number,
+      chinHeightAdjustment: chinHeightAdjustment as number,
+    });
+    setSummary(
+      [
+        foreheadHeightAdjustment
+          ? `Forehead height: ${Math.round(foreheadHeightAdjustment)}%`
+          : "",
+        eyeDistanceAdjustment
+          ? `Eye distance: ${Math.round(eyeDistanceAdjustment)}%`
+          : "",
+        noseWidthAdjustment
+          ? `Nose width: ${Math.round(noseWidthAdjustment)}%`
+          : "",
+        noseHeightAdjustment
+          ? `Nose height: ${Math.round(noseHeightAdjustment)}%`
+          : "",
+        // `Chin width: ${Math.round(chinWidthAdjustment)}%`: '',
+        chinHeightAdjustment
+          ? `Chin height: ${Math.round(chinHeightAdjustment)}%`
+          : "",
+      ]
+        .filter((r) => r !== "")
+        .join("<br/>")
+    );
+    // Clear the result canvas first
+    resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
+
+    const imageData = faceWarper.applyWarping(ctx);
+    if (imageData) {
+      resultCtx.putImageData(imageData, 0, 0);
+      console.log("Successfully drew optimized image to result canvas");
+    }
+
+    setOptimizedImageData(imageData);
+  }, [capturedImage, landmarks.length, originalImageData]);
+
+  // Cleanup countdown timer on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Kết nối video stream
+  useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.onloadedmetadata = () => {
+        videoRef.current!.play().catch((err) => {
+          console.error("[PersonalColor] Error playing video:", err);
+        });
+        setIsVideoReady(true);
+        setIsLoading(false);
+        setStatusMessage("Please keep your face steady for analysis");
+        setProgress(20);
+      };
+    }
+  }, [stream, setIsLoading]);
+
+  useEffect(() => {
+    if (!stream || !canvasRef.current) {
+      console.log("[PersonalColor] Waiting for FaceLandmarker or webcam...");
+      return;
+    }
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      setError("Failed to initialize canvas.");
+      return;
+    }
+
+    const detect = async () => {
+      try {
+        const now = performance.now();
+        if (now - lastDetectTime.current < 1000 / 60) {
+          animationFrameId.current = requestAnimationFrame(detect);
+          return;
+        }
+        lastDetectTime.current = now;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const canvasRatio = canvas.width / canvas.height;
+        let drawWidth = canvas.width;
+        let drawHeight = canvas.height;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        if (image) {
+          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          drawCalculatedRatios(ctx);
+          if (capturedImage) {
+            drawFacialFeaturePoints(canvas);
+          }
+          if (!originalImageData) {
+            setOriginalImageData(
+              ctx.getImageData(0, 0, canvas.width, canvas.height)
+            );
+          }
+        } else if (video) {
+          const videoRatio = video.videoWidth / video.videoHeight;
+          if (videoRatio > canvasRatio) {
+            drawHeight = canvas.width / videoRatio;
+            offsetY = (canvas.height - drawHeight) / 2;
+          } else {
+            drawWidth = canvas.height * videoRatio;
+            offsetX = (canvas.width - drawWidth) / 2;
+          }
+          ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+        }
+
+        if (
+          detectionResults?.face?.faceLandmarks &&
+          detectionResults?.face?.faceLandmarks.length > 0
+        ) {
+          const landmarks = detectionResults?.face?.faceLandmarks[0];
+          checkFrameStability(landmarks);
+
+          // Draw instructions on canvas when frame is stable
+          if (isFrameStable && !capturedImage && !analyzedResult) {
+            drawInstructions(ctx, canvas.width, canvas.height);
+          }
+        }
+      } catch (err) {
+        console.error("[CosmeticSurgery] Error during face detection:", err);
+      }
+
+      animationFrameId.current = requestAnimationFrame(detect);
+    };
+
+    detect();
+
+    return () => {
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
+    };
+  }, [
+    stream,
+    isVideoReady,
+    detectionResults,
+    isFrameStable,
+    countdownActive,
+    countdownValue,
+    optimizedImageData,
+    capturedImage,
+    optimizedCanvasRef,
+  ]);
+
   // Start the 3-second countdown
   const startCountdown = useCallback(() => {
     setCountdownActive(true);
@@ -268,186 +489,6 @@ export default function CosmeticSurgery() {
     }
   }, [capturedImage]);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const resultCanvas = resultCanvasRef.current;
-    if (!canvas || !resultCanvas) return;
-
-    // Set explicit sizes for both canvases
-    if (resultCanvas.width !== 640 || resultCanvas.height !== 480) {
-      resultCanvas.width = 640;
-      resultCanvas.height = 480;
-    }
-
-    const ctx = canvas.getContext("2d");
-    const resultCtx = resultCanvas.getContext("2d");
-    if (
-      !ctx ||
-      !resultCtx ||
-      !capturedImage ||
-      !originalImageData ||
-      !landmarks.length
-    )
-      return;
-
-    const faceWarper = new FaceWarper(landmarks, canvas.width, canvas.height);
-    faceWarper.setOriginalImageData(originalImageData);
-    const {
-      chinHeight,
-      eyeDistance,
-      foreheadHeight,
-      mouthWidth,
-      noseWidth,
-      chinHeightComment,
-      eyeDistanceComment,
-      foreheadHeightComment,
-      mouthWidthComment,
-      noseWidthComment,
-      // overallHarmony,
-    } = faceWarper.calculateWarpingParametersWithFeedback();
-    // console.log("Feedback:", feedback);
-    setAnalyzedResult([chinHeightComment,
-      eyeDistanceComment,
-      foreheadHeightComment,
-      mouthWidthComment,
-      noseWidthComment].join("<br/>"));
-    faceWarper.setParameters({
-      chinHeight: chinHeight as number,
-      eyeDistance: eyeDistance as number,
-      foreheadHeight: foreheadHeight as number,
-      mouthWidth: mouthWidth as number,
-      noseWidth: noseWidth as number,
-    });
-
-    // Clear the result canvas first
-    resultCtx.clearRect(0, 0, resultCanvas.width, resultCanvas.height);
-
-    const imageData = faceWarper.applyWarping(ctx);
-    if (imageData) {
-      resultCtx.putImageData(imageData, 0, 0);
-      console.log("Successfully drew optimized image to result canvas");
-    }
-
-    setOptimizedImageData(imageData);
-  }, [capturedImage, landmarks.length, originalImageData]);
-
-  // Cleanup countdown timer on unmount
-  useEffect(() => {
-    return () => {
-      if (countdownTimerRef.current) {
-        clearInterval(countdownTimerRef.current);
-      }
-    };
-  }, []);
-
-  // Kết nối video stream
-  useEffect(() => {
-    if (stream && videoRef.current) {
-      videoRef.current.srcObject = stream;
-      videoRef.current.onloadedmetadata = () => {
-        videoRef.current!.play().catch((err) => {
-          console.error("[PersonalColor] Error playing video:", err);
-        });
-        setIsVideoReady(true);
-        setIsLoading(false);
-        setStatusMessage("Please keep your face steady for analysis");
-        setProgress(20);
-      };
-    }
-  }, [stream, setIsLoading]);
-
-  useEffect(() => {
-    if (!stream || !canvasRef.current) {
-      console.log("[PersonalColor] Waiting for FaceLandmarker or webcam...");
-      return;
-    }
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      setError("Failed to initialize canvas.");
-      return;
-    }
-
-    const detect = async () => {
-      try {
-        const now = performance.now();
-        if (now - lastDetectTime.current < 1000 / 60) {
-          animationFrameId.current = requestAnimationFrame(detect);
-          return;
-        }
-        lastDetectTime.current = now;
-
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        const canvasRatio = canvas.width / canvas.height;
-        let drawWidth = canvas.width;
-        let drawHeight = canvas.height;
-        let offsetX = 0;
-        let offsetY = 0;
-
-        if (image) {
-          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-          // if (capturedImage) {
-          //   drawFacialFeaturePoints(canvas);
-          // }
-          if (!originalImageData) {
-            setOriginalImageData(
-              ctx.getImageData(0, 0, canvas.width, canvas.height)
-            );
-          }
-        } else if (video) {
-          const videoRatio = video.videoWidth / video.videoHeight;
-          if (videoRatio > canvasRatio) {
-            drawHeight = canvas.width / videoRatio;
-            offsetY = (canvas.height - drawHeight) / 2;
-          } else {
-            drawWidth = canvas.height * videoRatio;
-            offsetX = (canvas.width - drawWidth) / 2;
-          }
-          ctx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
-        }
-
-        if (
-          detectionResults?.face?.faceLandmarks &&
-          detectionResults?.face?.faceLandmarks.length > 0
-        ) {
-          const landmarks = detectionResults?.face?.faceLandmarks[0];
-          checkFrameStability(landmarks);
-
-          // Draw instructions on canvas when frame is stable
-          if (isFrameStable && !capturedImage) {
-            drawInstructions(ctx, canvas.width, canvas.height);
-          }
-        }
-      } catch (err) {
-        console.error("[CosmeticSurgery] Error during face detection:", err);
-      }
-
-      animationFrameId.current = requestAnimationFrame(detect);
-    };
-
-    detect();
-
-    return () => {
-      if (animationFrameId.current) {
-        cancelAnimationFrame(animationFrameId.current);
-      }
-    };
-  }, [
-    stream,
-    isVideoReady,
-    detectionResults,
-    isFrameStable,
-    countdownActive,
-    countdownValue,
-    optimizedImageData,
-    capturedImage,
-    isShowOptmizedImage,
-    optimizedCanvasRef,
-  ]);
-
   // Draw instructions on the canvas
   const drawInstructions = useCallback(
     (ctx: CanvasRenderingContext2D, width: number, height: number) => {
@@ -527,30 +568,34 @@ export default function CosmeticSurgery() {
   }, [detectionResults]);
 
   function drawFacialFeaturePoints(originalCanvas: HTMLCanvasElement) {
+    const topPoint = () => {
+      const midpoint = {
+        x: (landmarks[105].x + landmarks[334].x) / 2,
+        y: (landmarks[105].y + landmarks[334].y) / 2,
+      };
+      return {
+        x: 2 * landmarks[10].x - midpoint.x,
+        y: 2 * landmarks[10].y - midpoint.y,
+      };
+    };
     const originalCtx = originalCanvas.getContext("2d");
     if (!originalCanvas || !originalCtx) return;
 
     // Define landmark indices for different facial features
     const features = {
-      chin: [152, 175, 199, 200, 201, 208, 428, 429, 430, 431, 432, 433, 434],
-      cheeks: [
-        117, 118, 119, 120, 121, 347, 348, 349, 350, 351, 123, 147, 187, 207,
-        127, 162, 354, 376, 433,
-      ],
-      nose: [
-        1, 2, 3, 4, 5, 6, 168, 197, 195, 5, 4, 45, 220, 115, 114, 189, 188, 128,
-        245, 344, 278,
-      ],
-      nostrils: [
-        79, 166, 75, 77, 90, 180, 62, 78, 215, 305, 290, 392, 308, 415, 324,
-        405,
-      ],
-      noseBridge: [168, 6, 197, 195, 5, 4],
-      faceOval: [
-        10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365,
-        379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234,
-        127, 162, 21, 54, 103, 67, 109,
-      ],
+      // chin: [152, 175, 199, 200, 201, 208, 428, 429, 430, 431, 432, 433, 434],
+      // cheeks: [
+      //   117, 118, 119, 120, 121, 347, 348, 349, 350, 351, 123, 147, 187, 207,
+      //   127, 162, 354, 376, 433,
+      // ],
+      nose: [48, 278, 2, 9],
+      // nostrils: [
+      //   79, 166, 75, 77, 90, 180, 62, 78, 215, 305, 290, 392, 308, 415, 324,
+      //   405,
+      // ],
+      mouth: [61, 291],
+      faceOval: [234, 454, 152],
+      // faceOvalPoints: [topPoint(), landmarks[10], landmarks[234], landmarks[454]],
     };
 
     // Draw different features with different colors
@@ -558,9 +603,9 @@ export default function CosmeticSurgery() {
       chin: "#FF0000",
       cheeks: "#00FF00",
       nose: "#0000FF",
-      nostrils: "#FF00FF",
-      noseBridge: "#00FFFF",
-      faceOval: "rgba(255, 255, 0, 0.5)",
+      mouth: "#FF00FF",
+      // noseBridge: "#00FFFF",
+      faceOval: "#00FFFF",
     };
 
     // Draw points for each feature
@@ -573,31 +618,101 @@ export default function CosmeticSurgery() {
         originalCtx.beginPath();
         originalCtx.arc(x, y, 2, 0, 2 * Math.PI);
         originalCtx.fill();
-      }
-
-      // Connect points for face oval
-      if (feature === "faceOval") {
-        originalCtx.strokeStyle = featureColors[feature];
-        originalCtx.lineWidth = 1;
-        originalCtx.beginPath();
-
-        for (let i = 0; i < indices.length; i++) {
-          const idx = indices[i];
-          const x = landmarks[idx].x * originalCanvas.width;
-          const y = landmarks[idx].y * originalCanvas.height;
-
-          if (i === 0) {
-            originalCtx.moveTo(x, y);
-          } else {
-            originalCtx.lineTo(x, y);
-          }
-        }
-
         originalCtx.closePath();
-        originalCtx.stroke();
       }
     }
   }
+
+  // Draw calculated facial ratios overlay
+  function drawCalculatedRatios(ctx: CanvasRenderingContext2D | null) {
+    if (!ctx || !analyzedResult) return;
+    const {
+      faceWidth,
+      noseWidth,
+      mouthWidth,
+      eyeWidth,
+      eyeDistance,
+      faceHeight,
+      noseHeight,
+      foreheadHeight,
+      chinHeight,
+      noseWidthPerFaceWidth,
+      eyeDistancePerEyeWidth,
+      faceHeightPerFaceWidth,
+      noseHeightPerFaceHeight,
+      foreheadHeightPerFaceHeight,
+      chinHeightPerFaceHeight,
+    } = analyzedResult;
+    // const dpr = window.devicePixelRatio || 1;
+    ctx.save();
+    ctx.beginPath();
+    ctx.scale(0.8, 0.8);
+    ctx.rect(0, 0, 300, 300);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+    ctx.fill();
+    ctx.font = "14px Arial";
+    ctx.fillStyle = "white";
+    ctx.textAlign = "left";
+    ctx.textRendering = "geometricPrecision";
+    ctx.fillText("SIZE:", 10, 20);
+    ctx.fillText(`Face  width: ${faceWidth.toFixed(3)}`, 10, 35);
+    ctx.fillText(`Nose width: ${noseWidth.toFixed(3)}`, 10, 50);
+    ctx.fillText(`Mouth width: ${mouthWidth.toFixed(3)}`, 10, 65);
+    ctx.fillText(`Eye width: ${eyeWidth.toFixed(3)}`, 10, 80);
+    ctx.fillText(`Eye distance: ${eyeDistance.toFixed(3)}`, 10, 95);
+    ctx.fillText(`Face height: ${faceHeight.toFixed(3)}`, 10, 110);
+    ctx.fillText(`Nose height: ${noseHeight.toFixed(3)}`, 10, 125);
+    ctx.fillText(`Forehead height: ${foreheadHeight.toFixed(3)}`, 10, 140);
+    ctx.fillText(`Chin height: ${chinHeight.toFixed(3)}`, 10, 155);
+    ctx.fillText("-----------------------------------", 10, 170);
+    ctx.fillText("ACTUAL RATIO (IDEAL RATIO):", 10, 185);
+    ctx.fillText(
+      `Nose/Face width ratio: ${noseWidthPerFaceWidth.toFixed(3)} (${
+        IDEAL_RATIOS.noseWidthPerFaceWidth
+      })`,
+      10,
+      200
+    );
+    ctx.fillText(
+      `Eye distance/width ratio: ${eyeDistancePerEyeWidth.toFixed(3)} (${
+        IDEAL_RATIOS.eyeDistancePerEyeWidth
+      })`,
+      10,
+      215
+    );
+    ctx.fillText(
+      `Face height/width ratio: ${faceHeightPerFaceWidth.toFixed(3)} (${
+        IDEAL_RATIOS.faceHeightPerFaceWidth
+      })`,
+      10,
+      230
+    );
+    ctx.fillText(
+      `Nose/Face height ratio: ${noseHeightPerFaceHeight.toFixed(3)}( ${
+        IDEAL_RATIOS.noseHeightPerFaceHeight
+      })`,
+      10,
+      245
+    );
+    ctx.fillText(
+      `Forehead/Face height ratio: ${foreheadHeightPerFaceHeight.toFixed(3)} (${
+        IDEAL_RATIOS.foreheadHeightPerFaceHeight
+      })`,
+      10,
+      260
+    );
+    ctx.fillText(
+      `Chin/Face height ratio: ${chinHeightPerFaceHeight.toFixed(3)} (${
+        IDEAL_RATIOS.chinHeightPerFaceHeight
+      })`,
+      10,
+      275
+    );
+    // ctx.fillText("-----------------------------------", 10, 290);
+    ctx.closePath();
+    ctx.restore();
+  }
+
   return (
     <>
       <AnalysisLayout
@@ -605,7 +720,7 @@ export default function CosmeticSurgery() {
         description="Analyze facial features for cosmetic surgery recommendations."
         videoRef={videoRef}
         canvasRef={canvasRef}
-        result={analyzedResult}
+        result={sumary}
         error={error || webcamError}
         statusMessage={statusMessage}
         progress={progress}
