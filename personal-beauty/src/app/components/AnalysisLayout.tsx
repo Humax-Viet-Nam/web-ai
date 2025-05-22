@@ -12,6 +12,8 @@ interface AnalysisLayoutProps {
   description: string;
   videoRef: RefObject<HTMLVideoElement | null>;
   canvasRef: RefObject<HTMLCanvasElement | null>;
+  resultCanvasRef?: RefObject<HTMLCanvasElement | null>;
+  optimizedImageData?: ImageData | null;
   result: string | null;
   error: string | null;
   detectionResults?: any; // Thêm prop để nhận detectionResults
@@ -23,7 +25,7 @@ interface AnalysisLayoutProps {
   progress?: number; // Progress từ component cha (nếu có)
   countdownActive?: boolean;
   countdownValue?: number;
-  imageCaptured?: string
+  capturedImage?: string | null
 }
 
 const AnalysisLayout = memo(
@@ -32,6 +34,7 @@ const AnalysisLayout = memo(
     description,
     videoRef,
     canvasRef,
+    resultCanvasRef,
     result,
     error,
     detectionResults,
@@ -41,9 +44,7 @@ const AnalysisLayout = memo(
     statusMessage: propStatusMessage = "Initializing...",
     guideMessage,
     progress: propProgress = 0,
-    countdownActive,
-    countdownValue,
-    imageCaptured
+    capturedImage
   }: AnalysisLayoutProps) => {
     const [showError, setShowError] = useState(false);
 
@@ -147,7 +148,7 @@ const AnalysisLayout = memo(
               className="relative w-full overflow-hidden rounded-xl shadow-lg border-2 border-gray-200 bg-white" 
               style={{ paddingTop: "75%" /* 480/640 = 0.75 */ }}
             >
-              {!imageCaptured && <video
+              {!capturedImage && <video
                 ref={videoRef}
                 className="absolute inset-0 w-full h-full object-cover"
                 autoPlay
@@ -230,6 +231,7 @@ const AnalysisLayout = memo(
                 </div>
               </div>
             )}
+            <canvas id="result-canvas" className="stable" ref={resultCanvasRef}></canvas>
             
             {colorPalette && (
               <div className="flex-1 mt-2">
@@ -301,7 +303,8 @@ const AnalysisLayout = memo(
       prevProps.selectionButtons === nextProps.selectionButtons &&
       prevProps.progress === nextProps.progress &&
       prevProps.countdownActive === nextProps.countdownActive &&
-      prevProps.countdownValue === nextProps.countdownValue
+      prevProps.countdownValue === nextProps.countdownValue &&
+      prevProps.optimizedImageData === nextProps.optimizedImageData
     );
   }
 );
