@@ -28,7 +28,7 @@ export interface AnalyzedResult {
 const goldenRatio = 1.612;
 
 export const IDEAL_RATIOS = {
-  noseWidthPerFaceWidth: 0.34,
+  noseWidthPerFaceWidth: 0.25,
   mouthWidthPerNoseWidth: goldenRatio,
   eyeDistancePerEyeWidth: goldenRatio,
   faceHeightPerFaceWidth: goldenRatio,
@@ -215,11 +215,27 @@ export class FaceWarper {
         radius: this.imageWidth * 0.05,
         verticalIntensity: params.noseHeightAdjustment || 0,
       },
+      leftNostris: {
+        center: this.getLandmarkCoordinates(
+          FaceWarper.FACIAL_FEATURES.nostrils[0]
+        ),
+        radius: this.imageWidth * 0.05,
+        horizontalIntensity: params.noseWidthAdjustment || 0,
+        verticalIntensity: params.noseHeightAdjustment || 0,
+      },
+      rightNostris: {
+        center: this.getLandmarkCoordinates(
+          FaceWarper.FACIAL_FEATURES.nostrils[1]
+        ),
+        radius: this.imageWidth * 0.05,
+        horizontalIntensity: params.noseWidthAdjustment || 0,
+        verticalIntensity: params.noseHeightAdjustment || 0,
+      },
       chin: {
         center: this.getLandmarkCoordinates(
           FaceWarper.FACIAL_FEATURES.chinCenter
         ),
-        radius: this.imageWidth * 0.1,
+        radius: this.imageWidth * 0.2,
         // horizontalIntensity: params.chinWidthAdjustment,
         verticalIntensity: params.chinHeightAdjustment || 0,
       },
@@ -233,6 +249,22 @@ export class FaceWarper {
         },
         radius: this.imageWidth * 0.15,
         verticalIntensity: params.foreheadHeightAdjustment || 0,
+      },
+      rightCheck: {
+        center: {
+          x: this.getLandmarkCoordinates(434).x,
+          y: this.getLandmarkCoordinates(434).y,
+        },
+        radius: this.imageWidth * 0.05,
+        horizontalIntensity: -0.3,
+      },
+      leftCheck: {
+        center: {
+          x: this.getLandmarkCoordinates(214).x,
+          y: this.getLandmarkCoordinates(214).y,
+        },
+        radius: this.imageWidth * 0.05,
+        horizontalIntensity: -0.3,
       },
       eyes: {
         center: {
@@ -315,7 +347,7 @@ export class FaceWarper {
             } else if (feature === "chin") {
               // Chin width and height adjustments
               warpX = dx * (props.horizontalIntensity || 0) * weight;
-              warpY = dy * (props.verticalIntensity || 0) * weight;
+              warpY = dy * (props.verticalIntensity || 0) * weight + 0.5;
 
               // Extra vertical adjustment for chin height
               if (y > props.center.y) {
@@ -333,6 +365,29 @@ export class FaceWarper {
                 // Positive: move eyes apart, Negative: move eyes closer
                 const eyeCenter = props.center.x;
                 const direction = x < eyeCenter ? -1 : 1;
+                warpX =
+                  Math.abs(dx) * props.horizontalIntensity * direction * weight;
+              }
+            } else if (feature === "leftCheck" || feature === "rightCheck") {
+              // Eye distance adjustment
+              if (props.horizontalIntensity) {
+                // Apply horizontal stretching/compression
+                // Positive: move eyes apart, Negative: move eyes closer
+                const eyeCenter = props.center.x;
+                const direction = x < eyeCenter ? -1 : 1;
+                warpX =
+                  Math.abs(dx) * props.horizontalIntensity * direction * weight;
+              }
+            } else if (
+              feature === "leftNostris" ||
+              feature === "rightNostris"
+            ) {
+              // Nose width adjustment
+              if (props.horizontalIntensity) {
+                // Apply horizontal stretching/compression
+                // Positive: move nostrils apart, Negative: move nostrils closer
+                const nostrilCenter = props.center.x;
+                const direction = x < nostrilCenter ? -1 : 1;
                 warpX =
                   Math.abs(dx) * props.horizontalIntensity * direction * weight;
               }
