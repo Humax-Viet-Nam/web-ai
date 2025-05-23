@@ -301,7 +301,30 @@ const handleDetect = async () => {
 
 const handleDetectStill = async (imageBitmap: ImageBitmap, timestamp: number, modelTypes: string[] | string) => {
   try {
-    const results = await detectModelsOnBitmap(imageBitmap, timestamp, modelTypes);
+    if (!filesetResolver) {
+      filesetResolver = await FilesetResolver.forVisionTasks("/wasm");
+    }
+    const results = {} as any;
+
+    // Handle detection for each model type in the array
+    for (const modelType of Array.isArray(modelTypes) ? modelTypes : [modelTypes]) {
+      const { class: ModelClass, options } = modelConfigs[modelType];
+      if (!models.get(modelType)) {
+        models.set(modelType, await ModelClass.createFromOptions(filesetResolver, options));
+      }
+      if (modelType === "hair") {
+        const hairRaw = await models
+          .get(modelType)
+          .segmentForVideo(imageBitmap, timestamp);
+        if (hairRaw?.categoryMask) {
+          const mask = hairRaw.categoryMask;
+          const maskData = mask.getAsUint8Array();
+          results[modelType] = { data: maskData, width: mask.width, height: mask.height, timestamp };
+        }
+      } else {
+        results[modelType] = await models.get(modelType).detectForVideo(imageBitmap, timestamp);
+      }
+    }
     self.postMessage({ type: "detectionResult", results });
   } catch (err) {
     console.error("[VisionWorker] DetectionStill error:", err);

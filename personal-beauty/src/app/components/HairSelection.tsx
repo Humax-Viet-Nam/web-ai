@@ -22,6 +22,9 @@ const HairSelection: React.FC<HairSelectionProps> = ({
   onChangeSelectHair,
   handleScrollDown
 }) => {
+
+  console.log('Hair', hairColorList);
+
   return (
     <div className="md:w-2/12 bg-white p-2 md:p-2 rounded-xl shadow-md flex flex-col max-h-[calc(100vh-128px)] overflow-hidden">
     <button
@@ -37,7 +40,7 @@ const HairSelection: React.FC<HairSelectionProps> = ({
     >
       {hairColorList.map((color: any, index: any) => (
       <button
-        key={color.name + (filterHair === color.key ? 1 : 0)}
+        key={color.key}
         className={`flex area-button cursor-pointer duration-300 transform text-gray-800 hoverable hover:bg-gray-300 px-[20px] justify-start min-h-[120px] items-center gap-4 rounded-lg shadow-sm hover:shadow-md transition-shadow ease-in-out ${filterHair === color.key
           ? "bg-pink-600 text-white border-pink-300 hover:bg-pink-600"
           : "bg-gray-200 text-gray-800 hover:bg-gray-300"
