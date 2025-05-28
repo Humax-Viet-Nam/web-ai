@@ -60,13 +60,6 @@ export default function CosmeticSurgery() {
   const [optimizedImageData, setOptimizedImageData] =
     useState<ImageData | null>(null);
   const [sumary, setSummary] = useState<string | null>(null);
-  const [canvasDiemensions, setCanvasDimensions] = useState<{
-    width: number;
-    height: number;
-  }>({
-    width: 640,
-    height: 480,
-  });
 
   // Làm rõ nét các text trên canvas
   useEffect(() => {
@@ -222,7 +215,7 @@ export default function CosmeticSurgery() {
       !resultCtx ||
       !capturedImage ||
       !originalImageData ||
-      !landmarks.length
+      !landmarks?.length
     )
       return;
     // makeCanvasQuality(resultCanvas, resultCtx);
@@ -278,7 +271,7 @@ export default function CosmeticSurgery() {
     }
 
     setOptimizedImageData(imageData);
-  }, [capturedImage, landmarks.length, originalImageData]);
+  }, [capturedImage, landmarks?.length, originalImageData]);
 
   // Cleanup countdown timer on unmount
   useEffect(() => {
@@ -455,11 +448,7 @@ export default function CosmeticSurgery() {
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     worker.onmessage = (e) => {
       const { type, data } = e.data;
-      console.log("Worker message:", type, data);
       if (type === "results") {
-        console.log("Detection results:", data);
-
-        console.log("Set landmarks:", data.faceLandmarks[0]);
         setCapturedImage(imageDataURL);
         setLandmarks(data.faceLandmarks[0]);
         setProgress(100);
@@ -584,10 +573,11 @@ export default function CosmeticSurgery() {
     // Define landmark indices for different facial features
     const features = {
       // chin: [152, 175, 199, 200, 201, 208, 428, 429, 430, 431, 432, 433, 434],
-      // cheeks: [
-      //   117, 118, 119, 120, 121, 347, 348, 349, 350, 351, 123, 147, 187, 207,
-      //   127, 162, 354, 376, 433,
-      // ],
+      cheeks: [
+        434,
+        214
+      ],
+      eyes: [33, 133, 362, 263],
       nose: [48, 278, 2, 9],
       // nostrils: [
       //   79, 166, 75, 77, 90, 180, 62, 78, 215, 305, 290, 392, 308, 415, 324,
@@ -601,10 +591,10 @@ export default function CosmeticSurgery() {
     // Draw different features with different colors
     const featureColors: { [key: string]: string } = {
       chin: "#FF0000",
-      cheeks: "#00FF00",
+      eyes: "#00FF00",
       nose: "#0000FF",
       mouth: "#FF00FF",
-      // noseBridge: "#00FFFF",
+      check: "lime",
       faceOval: "#00FFFF",
     };
 
@@ -655,59 +645,48 @@ export default function CosmeticSurgery() {
     ctx.textAlign = "left";
     ctx.textRendering = "geometricPrecision";
     ctx.fillText("SIZE:", 10, 20);
-    ctx.fillText(`Face  width: ${faceWidth.toFixed(3)}`, 10, 35);
-    ctx.fillText(`Nose width: ${noseWidth.toFixed(3)}`, 10, 50);
-    ctx.fillText(`Mouth width: ${mouthWidth.toFixed(3)}`, 10, 65);
-    ctx.fillText(`Eye width: ${eyeWidth.toFixed(3)}`, 10, 80);
-    ctx.fillText(`Eye distance: ${eyeDistance.toFixed(3)}`, 10, 95);
-    ctx.fillText(`Face height: ${faceHeight.toFixed(3)}`, 10, 110);
-    ctx.fillText(`Nose height: ${noseHeight.toFixed(3)}`, 10, 125);
-    ctx.fillText(`Forehead height: ${foreheadHeight.toFixed(3)}`, 10, 140);
-    ctx.fillText(`Chin height: ${chinHeight.toFixed(3)}`, 10, 155);
+    ctx.fillText(`Face  width:`, 10, 35);
+    ctx.fillText(`Nose width:`, 10, 50);
+    ctx.fillText(`Mouth width:`, 10, 65);
+    ctx.fillText(`Eye width:`, 10, 80);
+    ctx.fillText(`Eye distance:`, 10, 95);
+    ctx.fillText(`Face height:`, 10, 110);
+    ctx.fillText(`Nose height:`, 10, 125);
+    ctx.fillText(`Forehead height:`, 10, 140);
+    ctx.fillText(`Chin height:`, 10, 155);
+    ctx.fillText(`${faceWidth.toFixed(3)}`, 190, 35);
+    ctx.fillText(`${noseWidth.toFixed(3)}`, 190, 50);
+    ctx.fillText(`${mouthWidth.toFixed(3)}`, 190, 65);
+    ctx.fillText(`${eyeWidth.toFixed(3)}`, 190, 80);
+    ctx.fillText(`${eyeDistance.toFixed(3)}`, 190, 95);
+    ctx.fillText(`${faceHeight.toFixed(3)}`, 190, 110);
+    ctx.fillText(`${noseHeight.toFixed(3)}`, 190, 125);
+    ctx.fillText(`${foreheadHeight.toFixed(3)}`, 190, 140);
+    ctx.fillText(`${chinHeight.toFixed(3)}`, 190, 155);
     ctx.fillText("-----------------------------------", 10, 170);
     ctx.fillText("ACTUAL RATIO (IDEAL RATIO):", 10, 185);
-    ctx.fillText(
-      `Nose/Face width ratio: ${noseWidthPerFaceWidth.toFixed(3)} (${
-        IDEAL_RATIOS.noseWidthPerFaceWidth
-      })`,
-      10,
-      200
-    );
-    ctx.fillText(
-      `Eye distance/width ratio: ${eyeDistancePerEyeWidth.toFixed(3)} (${
-        IDEAL_RATIOS.eyeDistancePerEyeWidth
-      })`,
-      10,
-      215
-    );
-    ctx.fillText(
-      `Face height/width ratio: ${faceHeightPerFaceWidth.toFixed(3)} (${
-        IDEAL_RATIOS.faceHeightPerFaceWidth
-      })`,
-      10,
-      230
-    );
-    ctx.fillText(
-      `Nose/Face height ratio: ${noseHeightPerFaceHeight.toFixed(3)}( ${
-        IDEAL_RATIOS.noseHeightPerFaceHeight
-      })`,
-      10,
-      245
-    );
-    ctx.fillText(
-      `Forehead/Face height ratio: ${foreheadHeightPerFaceHeight.toFixed(3)} (${
-        IDEAL_RATIOS.foreheadHeightPerFaceHeight
-      })`,
-      10,
-      260
-    );
-    ctx.fillText(
-      `Chin/Face height ratio: ${chinHeightPerFaceHeight.toFixed(3)} (${
-        IDEAL_RATIOS.chinHeightPerFaceHeight
-      })`,
-      10,
-      275
-    );
+    // Actual ratios in white
+    ctx.fillStyle = "white";
+    ctx.fillText(`Nose/Face width ratio:`, 10, 200);
+    ctx.fillText(`Eye distance/width ratio:`, 10, 215); 
+    ctx.fillText(`Face height/width ratio:`, 10, 230);
+    ctx.fillText(`Nose/Face height ratio:`, 10, 245);
+    ctx.fillText(`Forehead/Face height ratio:`, 10, 260);
+    ctx.fillText(`Chin/Face height ratio:`, 10, 275);
+    ctx.fillText(`${noseWidthPerFaceWidth.toFixed(3)}`, 190, 200);
+    ctx.fillText(`${eyeDistancePerEyeWidth.toFixed(3)}`, 190, 215);
+    ctx.fillText(`${faceHeightPerFaceWidth.toFixed(3)}`, 190, 230);
+    ctx.fillText(`${noseHeightPerFaceHeight.toFixed(3)}`, 190, 245);
+    ctx.fillText(`${foreheadHeightPerFaceHeight.toFixed(3)}`, 190, 260);
+    ctx.fillText(`${chinHeightPerFaceHeight.toFixed(3)}`, 190, 275);
+    // Ideal ratios in lime
+    ctx.fillStyle = "lime";
+    ctx.fillText(`(${IDEAL_RATIOS.noseWidthPerFaceWidth})`, 240, 200);
+    ctx.fillText(`(${IDEAL_RATIOS.eyeDistancePerEyeWidth})`, 240, 215);
+    ctx.fillText(`(${IDEAL_RATIOS.faceHeightPerFaceWidth})`, 240, 230);
+    ctx.fillText(`(${IDEAL_RATIOS.noseHeightPerFaceHeight})`, 240, 245);
+    ctx.fillText(`(${IDEAL_RATIOS.foreheadHeightPerFaceHeight})`, 240, 260);
+    ctx.fillText(`(${IDEAL_RATIOS.chinHeightPerFaceHeight})`, 240, 275);
     // ctx.fillText("-----------------------------------", 10, 290);
     ctx.closePath();
     ctx.restore();
