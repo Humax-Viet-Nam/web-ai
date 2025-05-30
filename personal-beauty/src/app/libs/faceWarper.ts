@@ -6,36 +6,7 @@ export interface NormalizedLandmark {
   y: number;
 }
 
-export interface AnalyzedResult {
-  noseWidth: number;
-  mouthWidth: number;
-  faceWidth: number;
-  eyeDistance: number;
-  eyeWidth: number;
-  faceHeight: number;
-  noseHeight: number;
-  foreheadHeight: number;
-  chinHeight: number;
-  noseWidthPerFaceWidth: number;
-  // mouthWidthPerNoseWidth: number;
-  eyeDistancePerEyeWidth: number;
-  faceHeightPerFaceWidth: number;
-  noseHeightPerFaceHeight: number;
-  foreheadHeightPerFaceHeight: number;
-  chinHeightPerFaceHeight: number;
-}
 
-const goldenRatio = 1.612;
-
-export const IDEAL_RATIOS = {
-  noseWidthPerFaceWidth: 0.25,
-  mouthWidthPerNoseWidth: goldenRatio,
-  eyeDistancePerEyeWidth: goldenRatio,
-  faceHeightPerFaceWidth: goldenRatio,
-  noseHeightPerFaceHeight: 0.33,
-  foreheadHeightPerFaceHeight: 0.33,
-  chinHeightPerFaceHeight: 0.33,
-};
 
 /**
  * Interface for warping parameters
@@ -470,10 +441,6 @@ export class FaceWarper {
     }
   }
 
-  private distance(p1: NormalizedLandmark, p2: NormalizedLandmark): number {
-    return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
-  }
-
   private clamp(value: number, min = -100, max = 100): number {
     return Math.max(min, Math.min(max, value));
   }
@@ -484,92 +451,6 @@ export class FaceWarper {
       return null;
     }
     return deviation;
-  }
-
-  public calculateWarpingParametersWithFeedback(): AnalyzedResult &
-    WarpingParameters {
-    const lm = this.landmarks;
-
-    // 1. Chiều rộng mũi / chiều rộng khuôn mặt
-    const noseWidth = this.distance(lm[48], lm[278]);
-    const faceWidth = this.distance(lm[234], lm[454]);
-    const noseWidthPerFaceWidth = noseWidth / faceWidth;
-
-    // 2. Chiều rộng miệng / chiều rộng mũi
-    const mouthWidth = this.distance(lm[61], lm[291]);
-    // const mouthWidthPerNoseWidth = mouthWidth / noseWidth;
-
-    // 3. Khoảng cách giữa 2 mắt / trung bình chiều rộng mắt
-    const eyeDistance = this.distance(lm[133], lm[362]);
-    const leftEyeWidth = this.distance(lm[33], lm[133]);
-    const rightEyeWidth = this.distance(lm[362], lm[263]);
-    const avgEyeWidth = (leftEyeWidth + rightEyeWidth) / 2;
-    const eyeWidth = avgEyeWidth;
-    const eyeDistancePerEyeWidth = eyeDistance / avgEyeWidth;
-
-    // 4. Chiều dài khuôn mặt / chiều rộng khuôn mặt
-    const faceHeight = this.distance(this.topPoint, lm[152]);
-    const faceHeightPerFaceWidth = faceHeight / faceWidth;
-
-    // 5. Chiều dài mũi / chiều dài khuôn mặt
-    // 6. Tỷ lệ trán:mũi:cằm (1:1:1)
-    const foreheadHeight = this.distance(this.topPoint, lm[9]);
-    const noseHeight = this.distance(lm[9], lm[2]);
-    const chinHeight = this.distance(lm[2], lm[152]);
-
-    const foreheadHeightPerFaceHeight = foreheadHeight / faceHeight;
-    const chinHeightPerFaceHeight = chinHeight / faceHeight;
-    const noseHeightPerFaceHeight = noseHeight / faceHeight;
-
-    const foreheadHeightAdjustment = this.getDeviation(
-      foreheadHeightPerFaceHeight,
-      IDEAL_RATIOS.foreheadHeightPerFaceHeight
-    );
-    const eyeDistanceAdjustment = this.getDeviation(
-      eyeDistancePerEyeWidth,
-      IDEAL_RATIOS.eyeDistancePerEyeWidth
-    );
-    const noseWidthAdjustment = this.getDeviation(
-      noseWidthPerFaceWidth,
-      IDEAL_RATIOS.noseWidthPerFaceWidth
-    );
-    const noseHeightAdjustment = this.getDeviation(
-      noseHeightPerFaceHeight,
-      IDEAL_RATIOS.noseHeightPerFaceHeight
-    );
-    // const chinWidthAdjustment = this.getDeviation(
-    //   mouthWidthPerNoseWidth,
-    //   IDEAL_RATIOS.mouthWidthPerNoseWidth
-    // );
-
-    const chinHeightAdjustment = this.getDeviation(
-      chinHeightPerFaceHeight,
-      IDEAL_RATIOS.chinHeightPerFaceHeight
-    );
-
-    return {
-      faceWidth,
-      noseWidth,
-      mouthWidth,
-      eyeWidth,
-      eyeDistance,
-      faceHeight,
-      noseHeight,
-      foreheadHeight,
-      chinHeight,
-      noseWidthPerFaceWidth,
-      eyeDistancePerEyeWidth,
-      faceHeightPerFaceWidth,
-      noseHeightPerFaceHeight,
-      foreheadHeightPerFaceHeight,
-      chinHeightPerFaceHeight,
-      foreheadHeightAdjustment,
-      eyeDistanceAdjustment,
-      noseWidthAdjustment,
-      noseHeightAdjustment,
-      // chinWidthAdjustment,
-      chinHeightAdjustment,
-    };
   }
 
   private get topPoint(): NormalizedLandmark {
@@ -583,3 +464,58 @@ export class FaceWarper {
     };
   }
 }
+
+
+export   function drawFacialFeaturePoints(originalCanvas: HTMLCanvasElement, landmarks: NormalizedLandmark[]) {
+    const topPoint = () => {
+      const midpoint = {
+        x: (landmarks[105].x + landmarks[334].x) / 2,
+        y: (landmarks[105].y + landmarks[334].y) / 2,
+      };
+      return {
+        x: 2 * landmarks[10].x - midpoint.x,
+        y: 2 * landmarks[10].y - midpoint.y,
+      };
+    };
+    const originalCtx = originalCanvas.getContext("2d");
+    if (!originalCanvas || !originalCtx) return;
+
+    // Define landmark indices for different facial features
+    const features = {
+      // chin: [152, 175, 199, 200, 201, 208, 428, 429, 430, 431, 432, 433, 434],
+      cheeks: [434, 214],
+      eyes: [33, 133, 362, 263],
+      nose: [48, 278, 2, 9],
+      // nostrils: [
+      //   79, 166, 75, 77, 90, 180, 62, 78, 215, 305, 290, 392, 308, 415, 324,
+      //   405,
+      // ],
+      mouth: [61, 291],
+      faceOval: [234, 454, 152],
+      // faceOvalPoints: [topPoint(), landmarks[10], landmarks[234], landmarks[454]],
+    };
+
+    // Draw different features with different colors
+    const featureColors: { [key: string]: string } = {
+      chin: "#FF0000",
+      eyes: "#00FF00",
+      nose: "#0000FF",
+      mouth: "#FF00FF",
+      check: "lime",
+      faceOval: "#00FFFF",
+    };
+
+    // Draw points for each feature
+    for (const [feature, indices] of Object.entries(features)) {
+      originalCtx.fillStyle = featureColors[feature];
+
+      for (const idx of indices) {
+        const x = landmarks[idx].x * originalCanvas.width;
+        const y = landmarks[idx].y * originalCanvas.height;
+        originalCtx.beginPath();
+        originalCtx.arc(x, y, 2, 0, 2 * Math.PI);
+        originalCtx.fill();
+        originalCtx.closePath();
+      }
+    }
+  }
