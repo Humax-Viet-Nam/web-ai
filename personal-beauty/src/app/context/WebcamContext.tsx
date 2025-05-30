@@ -76,6 +76,8 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({
         [key: string]: any;
     }>({});
     const indexRaiseStartTime = useRef<number | null>(null);
+    const previousIndexY = useRef<number | null>(null);
+    const preFistFreezePosition = useRef<{ x: number, y: number } | null>(null);
 
     const modelRequirements: { [key: string]: string[] } = {
         [VIEWS.PERSONAL_COLOR]: ["hand", "face"],
@@ -129,36 +131,39 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({
             const scaleY = window.innerHeight / videoHeight;
             const adjustedX = (1 - indexFingerTip.x) * videoWidth * scaleX;
             const adjustedY = indexFingerTip.y * videoHeight * scaleY;
-            const clampedX = Math.max(
-                0,
-                Math.min(adjustedX, window.innerWidth - 1)
-            );
-            const clampedY = Math.max(
-                0,
-                Math.min(adjustedY, window.innerHeight - 1)
-            );
+            const currentPosition = { x: adjustedX, y: adjustedY };
 
-            if (isFist && lastPositionBeforeFist.current) {
-                // Nếu đang nắm tay: giữ nguyên vị trí trước khi fist
-                return {
-                    isHandDetected: true,
-                    cursorPosition: lastPositionBeforeFist.current,
-                    isFist,
-                    isOpenHand,
-                    isIndexRaised,
-                };
-            } else {
-                // Khi không fist: cập nhật vị trí mới
-                const currentPosition = { x: clampedX, y: clampedY };
-                lastPositionBeforeFist.current = currentPosition;
-                return {
-                    isHandDetected: true,
-                    cursorPosition: currentPosition,
-                    isFist,
-                    isOpenHand,
-                    isIndexRaised,
-                };
+            // 1. Dự đoán fold bằng vận tốc/nghiêng
+            let predictedFist = false;
+            if (previousIndexY.current !== null) {
+                const dy = indexFingerTip.y - previousIndexY.current;
+                // Nếu dy đủ lớn (ví dụ > 0.04 mỗi frame, hoặc điều chỉnh phù hợp), đoán là sắp fold
+                if (dy > 0.04 && !isFist) {
+                    predictedFist = true;
+                    preFistFreezePosition.current = lastPositionBeforeFist.current || currentPosition;
+                }
             }
+            previousIndexY.current = indexFingerTip.y;
+
+            // 2. Nếu chưa fist, luôn update vị trí "chuẩn"
+            if (!isFist && !predictedFist) {
+                lastPositionBeforeFist.current = currentPosition;
+                preFistFreezePosition.current = null; // reset nếu đang di chuyển tự nhiên
+            }
+
+            // 3. Freeze khi fist hoặc dự đoán fist
+            let outputPosition = currentPosition;
+            if ((isFist || predictedFist) && (preFistFreezePosition.current || lastPositionBeforeFist.current)) {
+                outputPosition = preFistFreezePosition.current || lastPositionBeforeFist.current || currentPosition;
+            }
+
+            return {
+                isHandDetected: true,
+                cursorPosition: outputPosition,
+                isFist,
+                isOpenHand,
+                isIndexRaised,
+            };
         },
         [detectGesture]
     );
