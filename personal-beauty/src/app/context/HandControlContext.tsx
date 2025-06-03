@@ -81,7 +81,10 @@ export const HandControlProvider: React.FC<HandControlProviderProps> = ({ childr
 
     const hovered = getElementAtCursor(cursorPosition);
     elements.current.forEach((el) => el.classList.remove("hover"));
-    if (hovered) hovered.classList.add("hover");
+    if (hovered) {
+      hovered.classList.add("hover");
+      hovered.dispatchEvent(new Event("mouseover", { bubbles: true, cancelable: true }));
+    };
   }, [isHandDetectionEnabled]);
 
   const onClick = useCallback(() => {

@@ -53,26 +53,32 @@ export const FaceWarpingControllers = memo(
             </label>
             <div className="flex items-center gap-2 w-full">
               <TouchableButton
-                className="px-12 py-10 bg-pink-600 rounded text-white font-bold hover:cursor-pointer face-warping-control-button"
+                className="px-6 py-4 bg-pink-600 rounded text-white font-bold hover:cursor-pointer face-warping-control-button"
                 onClick={() =>
+                  handleChange(field, (faceWarpingValues[field] || 0) - 1)
+                }
+                onHover={() =>
                   handleChange(field, (faceWarpingValues[field] || 0) - 1)
                 }
                 label="-"
               />
               <input
-                type="number"
+                type="range"
                 min="-100"
                 max="100"
                 value={faceWarpingValues[field] || 0}
                 id={`${field}-input`}
-                className="w-full text-center border rounded p-9 text-3xl border-pink-400"
+                className="w-full text-center border rounded py-4 text-3xl border-pink-400"
                 onChange={(e) =>
                   handleChange(field, parseInt(e.target.value) || 0)
                 }
               />
               <TouchableButton
-                className="px-12 py-10 bg-pink-600 rounded text-white font-bold hover:cursor-pointer face-warping-control-button"
+                className="px-6 py-4 bg-pink-600 rounded text-white font-bold hover:cursor-pointer face-warping-control-button"
                 onClick={() =>
+                  handleChange(field, (faceWarpingValues[field] || 0) + 1)
+                }
+                onHover={() =>
                   handleChange(field, (faceWarpingValues[field] || 0) + 1)
                 }
                 label="+"

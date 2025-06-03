@@ -5,11 +5,13 @@ export const TouchableButton = React.memo(
   ({
     label,
     onClick,
+    onHover,
     className,
     style,
   }: {
     label: string;
     onClick: () => void;
+    onHover?: () => void;
     className?: string;
     style?: React.CSSProperties;
   }) => {
@@ -45,6 +47,7 @@ export const TouchableButton = React.memo(
         ref={buttonRef}
         className={className ? className : "touchable-button"}
         onClick={() => onClick()}
+        onMouseOver={() => onHover && onHover()}
       >
         {label.charAt(0).toUpperCase() + label.slice(1)}
       </button>

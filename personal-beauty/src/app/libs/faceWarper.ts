@@ -185,23 +185,24 @@ export class FaceWarper {
         center: this.getLandmarkCoordinates(FaceWarper.FACIAL_FEATURES.noseTip),
         radius: this.imageWidth * 0.05,
         verticalIntensity: params.noseHeightAdjustment || 0,
-      },
-      leftNostris: {
-        center: this.getLandmarkCoordinates(
-          FaceWarper.FACIAL_FEATURES.nostrils[0]
-        ),
-        radius: this.imageWidth * 0.05,
         horizontalIntensity: params.noseWidthAdjustment || 0,
-        verticalIntensity: params.noseHeightAdjustment || 0,
       },
-      rightNostris: {
-        center: this.getLandmarkCoordinates(
-          FaceWarper.FACIAL_FEATURES.nostrils[1]
-        ),
-        radius: this.imageWidth * 0.05,
-        horizontalIntensity: params.noseWidthAdjustment || 0,
-        verticalIntensity: params.noseHeightAdjustment || 0,
-      },
+      // leftNostris: {
+      //   center: this.getLandmarkCoordinates(
+      //     FaceWarper.FACIAL_FEATURES.nostrils[0]
+      //   ),
+      //   radius: this.imageWidth * 0.05,
+      //   horizontalIntensity: params.noseWidthAdjustment || 0,
+      //   verticalIntensity: params.noseHeightAdjustment || 0,
+      // },
+      // rightNostris: {
+      //   center: this.getLandmarkCoordinates(
+      //     FaceWarper.FACIAL_FEATURES.nostrils[1]
+      //   ),
+      //   radius: this.imageWidth * 0.05,
+      //   horizontalIntensity: params.noseWidthAdjustment || 0,
+      //   verticalIntensity: params.noseHeightAdjustment || 0,
+      // },
       chin: {
         center: this.getLandmarkCoordinates(
           FaceWarper.FACIAL_FEATURES.chinCenter
@@ -220,22 +221,6 @@ export class FaceWarper {
         },
         radius: this.imageWidth * 0.15,
         verticalIntensity: params.foreheadHeightAdjustment || 0,
-      },
-      rightCheck: {
-        center: {
-          x: this.getLandmarkCoordinates(434).x,
-          y: this.getLandmarkCoordinates(434).y,
-        },
-        radius: this.imageWidth * 0.05,
-        horizontalIntensity: -0.3,
-      },
-      leftCheck: {
-        center: {
-          x: this.getLandmarkCoordinates(214).x,
-          y: this.getLandmarkCoordinates(214).y,
-        },
-        radius: this.imageWidth * 0.05,
-        horizontalIntensity: -0.3,
       },
       eyes: {
         center: {
