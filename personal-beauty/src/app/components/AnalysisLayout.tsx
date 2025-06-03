@@ -23,7 +23,7 @@ interface AnalysisLayoutProps {
   progress?: number; // Progress từ component cha (nếu có)
   countdownActive?: boolean;
   countdownValue?: number;
-  capturedImage?: string | null;
+  capturedImage?: ImageData | null;
   controllers?: JSX.Element; // Thêm prop để nhận các controller
 }
 

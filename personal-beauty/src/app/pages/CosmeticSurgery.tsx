@@ -66,22 +66,17 @@ export default function CosmeticSurgery() {
   const [selectedArea, setSelectedArea] = useState<string | null>(
     "face_symmetry"
   );
-  const [warpedImage, setWarpedImage] = useState<ImageData | null>(null);
-  const [faceWarpingValues, setFaceWarpingValues] = useState<WarpingParameters>({
+  const [faceWarpingValues, setFaceWarpingValues] = useState<WarpingParameters>(
+    {
       noseWidthAdjustment: 0,
       eyeDistanceAdjustment: 0,
       foreheadHeightAdjustment: 0,
       chinHeightAdjustment: 0,
       noseHeightAdjustment: 0,
-    });
-
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
-  const [originalImageData, setOriginalImageData] = useState<ImageData | null>(
-    null
+    }
   );
 
   const [sumaryResult, setSummaryResult] = useState<string | null>(null);
-
   const controlAreas = [
     {
       name: "face_symmetry",
@@ -96,24 +91,9 @@ export default function CosmeticSurgery() {
       label: "Adjust Face",
     },
   ];
-  // Làm rõ nét các text trên canvas
+
   useEffect(() => {
     setCurrentView(VIEWS.COSMETIC_SURGERY);
-    if (canvasRef.current) {
-      const canvas = canvasRef.current;
-      const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      // setCanvasDimensions({ width: rect.width * dpr, height: rect.height * dpr });
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.scale(dpr, dpr); // scale context để nội dung không bị phóng to
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = "high";
-      }
-    }
   }, []);
 
   const checkFrameStability = useCallback(
@@ -269,6 +249,8 @@ export default function CosmeticSurgery() {
 
     const detect = async () => {
       try {
+        if (capturedImage) return;
+
         const now = performance.now();
         if (now - lastDetectTime.current < 1000 / 60) {
           animationFrameId.current = requestAnimationFrame(detect);
@@ -282,17 +264,7 @@ export default function CosmeticSurgery() {
         let offsetX = 0;
         let offsetY = 0;
 
-        if (image) {
-          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-          if (!originalImageData) {
-            setOriginalImageData(
-              ctx.getImageData(0, 0, canvas.width, canvas.height)
-            );
-          }
-          if (capturedImage) {
-            drawResult();
-          }
-        } else if (video) {
+        if (video) {
           const videoRatio = video.videoWidth / video.videoHeight;
           if (videoRatio > canvasRatio) {
             drawHeight = canvas.width / videoRatio;
@@ -387,52 +359,48 @@ export default function CosmeticSurgery() {
     );
   }, [capturedLandmarks]);
 
+  const adjustFace = useCallback(() => {
+    if (!capturedLandmarks.length || !canvasRef.current || !capturedImage) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      setError("Failed to initialize canvas context.");
+      return;
+    }
+    setSummaryResult("Change face parameters to adjust the face shape. Move your hand to the buttons to adjust the parameters.");
+    const width = canvas.width;
+    const height = canvas.height;
+    const faceWarper = new FaceWarper(capturedLandmarks, width, height);
+    faceWarper.setOriginalImageData(capturedImage);
+    faceWarper.setParameters(faceWarpingValues as WarpingParameters);
+    const imageData = faceWarper.applyWarping(ctx);
+    if (imageData) {
+      ctx.putImageData(imageData, 0, 0);
+    }
+  }, [capturedImage, capturedLandmarks, faceWarpingValues]);
+
   // Only run adjustFace when its dependencies change, not every animation frame
   useEffect(() => {
-    if (
-      capturedImage &&
-      selectedArea === "adjust_face" &&
-      capturedLandmarks &&
-      originalImageData
-    ) {
-      setSummaryResult("Change face parameters to adjust the face shape.");
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext("2d");
-      if (!ctx || !canvas) return;
-      const width = canvas.width;
-      const height = canvas.height;
-      const faceWarper = new FaceWarper(capturedLandmarks, width, height);
-      faceWarper.setOriginalImageData(originalImageData);
-      faceWarper.setParameters(faceWarpingValues as WarpingParameters);
-      const imageData = faceWarper.applyWarping(ctx);
-      if (imageData) {
-        setWarpedImage(imageData);
-      }
-    }
-  }, [capturedImage, selectedArea, capturedLandmarks, originalImageData, faceWarpingValues]);
-
-  const drawResult = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
-    if (!ctx || !canvas || !capturedImage || !selectedArea) return;
-
+    if (!ctx || !canvas || !capturedImage || !selectedArea || !capturedLandmarks.length) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     switch (selectedArea) {
       case "golden_ratio":
+        ctx.putImageData(capturedImage, 0, 0);
         analysisGoldenRatio();
         break;
       case "adjust_face":
-        // adjustFace(); // No longer call here
-        if (warpedImage) {
-          ctx.putImageData(warpedImage, 0, 0);
-        }
+        adjustFace();
         break;
       default:
       case "face_symmetry":
+        ctx.putImageData(capturedImage, 0, 0);
         analysisFaceSymmetry();
         drawFaceHeatMap(canvasRef, capturedLandmarks);
         break;
     }
-  }, [selectedArea, capturedImage, faceWarpingValues]);
+  }, [capturedImage, selectedArea, faceWarpingValues, analysisFaceSymmetry, analysisGoldenRatio, adjustFace, capturedLandmarks]);
 
   // Capture an image from the current video frame
   const selectionButtons = useMemo(
@@ -455,17 +423,6 @@ export default function CosmeticSurgery() {
     ),
     [selectedArea, setSelectedArea]
   );
-  useEffect(() => {
-    if (capturedImage) {
-      const image = new Image();
-      image.src = capturedImage;
-      image.onload = () => {
-        setImage(image);
-        setProgress(100);
-        setStatusMessage("Image captured successfully!");
-      };
-    }
-  }, [capturedImage]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -489,7 +446,10 @@ export default function CosmeticSurgery() {
         statusMessage={statusMessage}
         controllers={
           (capturedImage && selectedArea === "adjust_face" && (
-            <FaceWarpingControllers faceWarpingValues={faceWarpingValues} setFaceWarpingValues={setFaceWarpingValues}/>
+            <FaceWarpingControllers
+              faceWarpingValues={faceWarpingValues}
+              setFaceWarpingValues={setFaceWarpingValues}
+            />
           )) ||
           undefined
         }

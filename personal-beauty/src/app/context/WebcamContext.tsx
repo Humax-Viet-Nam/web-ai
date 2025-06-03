@@ -37,7 +37,7 @@ interface WebcamContextType {
   setCurrentView: (view: any) => void;
   cursorRef: RefObject<HTMLDivElement>;
   workerRef: RefObject<Worker | null>;
-  capturedImage: string | null;
+  capturedImage: ImageData | null;
   countdownActive: boolean;
   countdownValue: number;
   countdownTimerRef: RefObject<NodeJS.Timeout | null>;
@@ -91,7 +91,7 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({
   // New state for countdown and image capture
   const [countdownActive, setCountdownActive] = useState(false);
   const [countdownValue, setCountdownValue] = useState(3);
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [capturedImage, setCapturedImage] = useState<ImageData | null>(null);
   const [capturedLandmarks, setCapturedLandmarks] = useState<
     NormalizedLandmark[]
   >([]);
@@ -253,13 +253,12 @@ export const WebcamProvider: React.FC<{ children: React.ReactNode }> = ({
 
       // Draw the current video frame to the canvas
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      // Get the image data URL
-      const imageDataURL = canvas.toDataURL("image/jpeg");
+
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       worker.onmessage = (e) => {
         const { type, data } = e.data;
         if (type === "results") {
-          setCapturedImage(imageDataURL);
+          setCapturedImage(imageData);
           setCapturedLandmarks(data.faceLandmarks[0]);
           // setProgress(100);
         } else if (type === "initialized") {
