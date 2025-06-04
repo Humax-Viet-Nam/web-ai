@@ -3,7 +3,6 @@ import { useHandControl } from "../context/HandControlContext";
 import { TouchableButton } from "./TouchableButton";
 import { WarpingParameters } from "../libs/faceWarper";
 
-
 export const FaceWarpingControllers = memo(
   ({
     faceWarpingValues,
@@ -47,11 +46,11 @@ export const FaceWarpingControllers = memo(
     const NumberInput = (field: keyof WarpingParameters, label: string) =>
       useMemo(() => {
         return (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1">
             <label className="text-sm" htmlFor={`${field}-input`}>
               {label}
             </label>
-            <div className="flex items-center gap-2 w-full">
+            <div className="flex items-center gap-1 w-full">
               <TouchableButton
                 className="px-6 py-4 bg-pink-600 rounded text-white font-bold hover:cursor-pointer face-warping-control-button"
                 onClick={() =>
@@ -62,17 +61,22 @@ export const FaceWarpingControllers = memo(
                 }
                 label="-"
               />
-              <input
-                type="range"
-                min="-100"
-                max="100"
-                value={faceWarpingValues[field] || 0}
-                id={`${field}-input`}
-                className="w-full text-center border rounded py-4 text-3xl border-pink-400"
-                onChange={(e) =>
-                  handleChange(field, parseInt(e.target.value) || 0)
-                }
-              />
+              <div className="w-full">
+                <p className="text-center text-xl font-bold">
+                  {faceWarpingValues[field] || 0}
+                </p>
+                <input
+                  type="range"
+                  min="-100"
+                  max="100"
+                  value={faceWarpingValues[field] || 0}
+                  id={`${field}-input`}
+                  className="w-full text-center border rounded py-2 text-3xl border-pink-400"
+                  onChange={(e) =>
+                    handleChange(field, parseInt(e.target.value) || 0)
+                  }
+                />
+              </div>
               <TouchableButton
                 className="px-6 py-4 bg-pink-600 rounded text-white font-bold hover:cursor-pointer face-warping-control-button"
                 onClick={() =>
@@ -93,7 +97,10 @@ export const FaceWarpingControllers = memo(
         <div className="flex flex-col gap-4">
           {NumberInput("noseWidthAdjustment", "Nose Width Adjustment")}
           {NumberInput("eyeDistanceAdjustment", "Eye Distance Adjustment")}
-          {NumberInput("foreheadHeightAdjustment", "Forehead Height Adjustment")}
+          {NumberInput(
+            "foreheadHeightAdjustment",
+            "Forehead Height Adjustment"
+          )}
           {NumberInput("chinHeightAdjustment", "Chin Height Adjustment")}
         </div>
       </div>

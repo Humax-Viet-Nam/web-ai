@@ -12,7 +12,7 @@ interface AnalysisLayoutProps {
   videoRef: RefObject<HTMLVideoElement | null>;
   canvasRef: RefObject<HTMLCanvasElement | null>;
   optimizedImageData?: ImageData | null;
-  result: string | null;
+  result: string | null | undefined;
   error: string | null;
   detectionResults?: any; // Thêm prop để nhận detectionResults
   selectionButtons?: JSX.Element;
@@ -25,6 +25,7 @@ interface AnalysisLayoutProps {
   countdownValue?: number;
   capturedImage?: ImageData | null;
   controllers?: JSX.Element; // Thêm prop để nhận các controller
+  disableResult?: boolean; // Thêm prop để vô hiệu hóa kết quả
 }
 
 const AnalysisLayout = memo(
@@ -44,6 +45,7 @@ const AnalysisLayout = memo(
     guideMessage,
     progress: propProgress = 0,
     capturedImage,
+    disableResult,
   }: AnalysisLayoutProps) => {
     const [showError, setShowError] = useState(false);
 
@@ -314,7 +316,7 @@ const AnalysisLayout = memo(
               Analysis Result
             </h2>
 
-            {result ? (
+            {!disableResult && (result ? (
               <div
                 className={`text-base md:text-lg text-gray-700 mb-3 animate-fadeIn p-3 rounded-lg max-h-[100%] overflow-auto ${
                   result.toLowerCase() === "warm"
@@ -365,7 +367,7 @@ const AnalysisLayout = memo(
                   <span>Analyzing...</span>
                 </div>
               </div>
-            )}
+            ))}
             {controllers}
             {colorPalette && (
               <div className="flex-1 mt-2">
@@ -453,7 +455,8 @@ const AnalysisLayout = memo(
       prevProps.countdownActive === nextProps.countdownActive &&
       prevProps.countdownValue === nextProps.countdownValue &&
       prevProps.optimizedImageData === nextProps.optimizedImageData &&
-      prevProps.controllers === nextProps.controllers
+      prevProps.controllers === nextProps.controllers &&
+      prevProps.disableResult === nextProps.disableResult
     );
   }
 );

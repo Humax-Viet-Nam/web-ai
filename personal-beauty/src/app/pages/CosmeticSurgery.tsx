@@ -66,6 +66,8 @@ export default function CosmeticSurgery() {
   const [selectedArea, setSelectedArea] = useState<string | null>(
     "face_symmetry"
   );
+  // guideLine state
+  const [guideLine, setGuideLine] = useState<string>("");
   const [faceWarpingValues, setFaceWarpingValues] = useState<WarpingParameters>(
     {
       noseWidthAdjustment: 0,
@@ -332,7 +334,7 @@ export default function CosmeticSurgery() {
   }, [capturedLandmarks]);
 
   const analysisGoldenRatio = useCallback(() => {
-    if (capturedLandmarks.length < 468) return;
+    if (!capturedLandmarks || capturedLandmarks.length < 468) return;
     const analyzedResult = calculateFaceGoldenRatio(capturedLandmarks);
     drawCalculatedRatios(canvasRef, analyzedResult);
     setSummaryResult(
@@ -360,14 +362,13 @@ export default function CosmeticSurgery() {
   }, [capturedLandmarks]);
 
   const adjustFace = useCallback(() => {
-    if (!capturedLandmarks.length || !canvasRef.current || !capturedImage) return;
+    if (!capturedLandmarks || !capturedLandmarks.length || !canvasRef.current || !capturedImage) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
       setError("Failed to initialize canvas context.");
       return;
     }
-    setSummaryResult("Change face parameters to adjust the face shape. Move your hand to the buttons to adjust the parameters.");
     const width = canvas.width;
     const height = canvas.height;
     const faceWarper = new FaceWarper(capturedLandmarks, width, height);
@@ -383,7 +384,7 @@ export default function CosmeticSurgery() {
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
-    if (!ctx || !canvas || !capturedImage || !selectedArea || !capturedLandmarks.length) return;
+    if (!ctx || !canvas || !capturedImage || !selectedArea || !capturedLandmarks || !capturedLandmarks.length) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     switch (selectedArea) {
       case "golden_ratio":
@@ -433,15 +434,30 @@ export default function CosmeticSurgery() {
 
     return () => clearInterval(interval);
   }, [detectionResults]);
-
+  useEffect(() => {
+    if (selectedArea === "face_symmetry") {
+      setGuideLine(
+        "Analyze face symmetry by comparing left and right sides of the face."
+      );
+    } else if (selectedArea === "golden_ratio") {
+      setGuideLine(
+        "Analyze face golden ratio by calculating various facial ratios."
+      );
+    } else {
+      setGuideLine(
+        "Adjust face parameters to modify the face shape. Use the controls to change the parameters."
+      );
+    }
+  }, [selectedArea])
   return (
     <>
       <AnalysisLayout
         title="Cosmetic Surgery"
-        description="Analyze facial features for cosmetic surgery recommendations."
+        description={guideLine}
         videoRef={videoRef}
         canvasRef={canvasRef}
         result={sumaryResult}
+        disableResult={selectedArea === "adjust_face"}
         error={error || webcamError}
         statusMessage={statusMessage}
         controllers={
