@@ -96,7 +96,7 @@ export const drawFaceHeatMap = (
     // Vẽ hình tròn lên mỗi điểm trái/phải
     [left, right].forEach((pt) => {
       ctx.beginPath();
-      ctx.arc(pt.x * width, pt.y * height, 6, 0, 2 * Math.PI);
+      ctx.arc(pt.x * width, pt.y * height, 3, 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.fill();
     });
