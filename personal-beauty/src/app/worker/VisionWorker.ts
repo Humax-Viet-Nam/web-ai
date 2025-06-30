@@ -73,7 +73,7 @@ const isIndexRaised = (landmarks: any[]): boolean => {
   const p5 = landmarks[5]; // gốc ngón trỏ
   const p8 = landmarks[8]; // đầu ngón trỏ
   const p12 = landmarks[12]; // đầu ngón giữa
-  const p16 = landmarks[16]; // đầu ngón đeo nhẫn
+  const p16 = landmarks[16]; 
 
   // 1. Kiểm tra góc giữa p5 → p8
   const dx = p8.x - p5.x;
